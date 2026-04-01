@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "backend",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": ["-c", "cd /Users/garrettgunther/Projects/MasterScheduleSolver/backend && python3 -m uvicorn main:app --reload --port ${PORT:-8000}"],
+      "port": 8000
+    },
+    {
+      "name": "frontend",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": ["-c", "cd /Users/garrettgunther/Projects/MasterScheduleSolver/frontend && npm run dev -- --port ${PORT:-5173}"],
+      "port": 5173
+    }
+  ]
+}

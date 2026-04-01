@@ -1,0 +1,32 @@
+# Dependencies
+node_modules/
+__pycache__/
+*.pyc
+
+# Databases
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+
+# Build output
+frontend/dist/
+
+# Environment
+.env
+.env.*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Data (raw source files — large binaries)
+data/raw/*.xlsx
+_references/
+
+# Solver runs output
+data/projects/*/runs/
