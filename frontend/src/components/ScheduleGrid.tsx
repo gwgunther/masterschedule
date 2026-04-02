@@ -15,6 +15,7 @@ interface Props {
   fixedKeys?: Set<string>;
   coteachKeys?: Set<string>;
   courseNames?: Map<string, string>;
+  courseEnrollment?: Map<string, { enrollment_7th: number; enrollment_8th: number }>;
 }
 
 const PERIODS = [1, 2, 3, 4, 5, 6, 7];
@@ -47,7 +48,7 @@ function courseLabel(courseId: string, courseNames?: Map<string, string>): strin
   return title.length > 14 ? title.slice(0, 13) + "…" : title;
 }
 
-export default function ScheduleGrid({ sections, teachers, onSelectTeacher, selectedTeacherId, fixedKeys, coteachKeys, courseNames }: Props) {
+export default function ScheduleGrid({ sections, teachers, onSelectTeacher, selectedTeacherId, fixedKeys, coteachKeys, courseNames, courseEnrollment }: Props) {
   // lookup: teacher_id → period → Section
   const lookup = new Map<string, Map<number, Section>>();
   for (const s of sections) {
@@ -63,6 +64,29 @@ export default function ScheduleGrid({ sections, teachers, onSelectTeacher, sele
     byDept.get(d)!.push(t);
   }
   const depts = [...byDept.keys()].sort();
+
+  // Non-instructional courses don't count toward student seats
+  const NON_INSTR = new Set(["CONFERENCE", "PROGRESS", "PROGRESSMON", "TITLE1", "COMMUNITY", "COMSCHOOLS", "5CS", "ASB", "ASBRELEASE", "REWARDS", "DLI"]);
+
+  // Per-period seat totals (from solver output sections)
+  const periodSeats7 = new Map<number, number>();
+  const periodSeats8 = new Map<number, number>();
+  for (const s of sections) {
+    if (NON_INSTR.has(s.course_id)) continue;
+    periodSeats7.set(s.period, (periodSeats7.get(s.period) ?? 0) + (s.students_7th ?? 0));
+    periodSeats8.set(s.period, (periodSeats8.get(s.period) ?? 0) + (s.students_8th ?? 0));
+  }
+
+  // Total enrollment from courses table (same every period)
+  let totalEnrollment7 = 0;
+  let totalEnrollment8 = 0;
+  if (courseEnrollment) {
+    for (const [cid, enr] of courseEnrollment) {
+      if (NON_INSTR.has(cid)) continue;
+      totalEnrollment7 += enr.enrollment_7th;
+      totalEnrollment8 += enr.enrollment_8th;
+    }
+  }
 
   return (
     <div style={{ overflow: "auto", height: "100%" }}>
@@ -131,6 +155,60 @@ export default function ScheduleGrid({ sections, teachers, onSelectTeacher, sele
             </>
           ))}
         </tbody>
+        {sections.length > 0 && courseEnrollment && courseEnrollment.size > 0 && (
+          <tfoot className="schedule-summary">
+            <tr className="summary-label-row">
+              <td colSpan={8} />
+            </tr>
+            <tr className="summary-row">
+              <td className="summary-label">Seats (7th)</td>
+              {PERIODS.map(p => <td key={p} className="summary-cell">{periodSeats7.get(p) ?? 0}</td>)}
+            </tr>
+            <tr className="summary-row">
+              <td className="summary-label">Seats (8th)</td>
+              {PERIODS.map(p => <td key={p} className="summary-cell">{periodSeats8.get(p) ?? 0}</td>)}
+            </tr>
+            <tr className="summary-row summary-row-bold">
+              <td className="summary-label">Seats (total)</td>
+              {PERIODS.map(p => <td key={p} className="summary-cell">{(periodSeats7.get(p) ?? 0) + (periodSeats8.get(p) ?? 0)}</td>)}
+            </tr>
+            <tr className="summary-spacer"><td colSpan={8} /></tr>
+            <tr className="summary-row">
+              <td className="summary-label">Enrollment (7th)</td>
+              {PERIODS.map(p => <td key={p} className="summary-cell">{totalEnrollment7}</td>)}
+            </tr>
+            <tr className="summary-row">
+              <td className="summary-label">Enrollment (8th)</td>
+              {PERIODS.map(p => <td key={p} className="summary-cell">{totalEnrollment8}</td>)}
+            </tr>
+            <tr className="summary-row summary-row-bold">
+              <td className="summary-label">Enrollment (total)</td>
+              {PERIODS.map(p => <td key={p} className="summary-cell">{totalEnrollment7 + totalEnrollment8}</td>)}
+            </tr>
+            <tr className="summary-spacer"><td colSpan={8} /></tr>
+            <tr className="summary-row">
+              <td className="summary-label">Net (7th)</td>
+              {PERIODS.map(p => {
+                const diff = (periodSeats7.get(p) ?? 0) - totalEnrollment7;
+                return <td key={p} className={`summary-cell ${diff > 0 ? "summary-pos" : diff < 0 ? "summary-neg" : ""}`}>{diff > 0 ? "+" : ""}{diff}</td>;
+              })}
+            </tr>
+            <tr className="summary-row">
+              <td className="summary-label">Net (8th)</td>
+              {PERIODS.map(p => {
+                const diff = (periodSeats8.get(p) ?? 0) - totalEnrollment8;
+                return <td key={p} className={`summary-cell ${diff > 0 ? "summary-pos" : diff < 0 ? "summary-neg" : ""}`}>{diff > 0 ? "+" : ""}{diff}</td>;
+              })}
+            </tr>
+            <tr className="summary-row summary-row-bold">
+              <td className="summary-label">Net (total)</td>
+              {PERIODS.map(p => {
+                const diff = (periodSeats7.get(p) ?? 0) + (periodSeats8.get(p) ?? 0) - totalEnrollment7 - totalEnrollment8;
+                return <td key={p} className={`summary-cell ${diff > 0 ? "summary-pos" : diff < 0 ? "summary-neg" : ""}`}>{diff > 0 ? "+" : ""}{diff}</td>;
+              })}
+            </tr>
+          </tfoot>
+        )}
       </table>
     </div>
   );

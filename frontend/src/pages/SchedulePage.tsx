@@ -27,6 +27,7 @@ export default function SchedulePage({ activeTab, scheduleVersion, diagnostics, 
   const [fixedKeys, setFixedKeys] = useState<Set<string>>(new Set());
   const [coteachKeys, setCoteachKeys] = useState<Set<string>>(new Set());
   const [courseNames, setCourseNames] = useState<Map<string, string>>(new Map());
+  const [courseEnrollment, setCourseEnrollment] = useState<Map<string, { enrollment_7th: number; enrollment_8th: number }>>(new Map());
 
   const showingBestAttempt = hasBestAttempt && (diagnostics?.length ?? 0) > 0;
   const hasDiagnostics = diagnostics && diagnostics.length > 0;
@@ -43,8 +44,16 @@ export default function SchedulePage({ activeTab, scheduleVersion, diagnostics, 
     fetchTable("teachers").then(rows => setTeachers(rows as unknown as Teacher[]));
     fetchTable("courses").then(rows => {
       const map = new Map<string, string>();
-      for (const r of rows) if (r.course_id && r.course_title) map.set(String(r.course_id), String(r.course_title));
+      const enr = new Map<string, { enrollment_7th: number; enrollment_8th: number }>();
+      for (const r of rows) {
+        if (r.course_id && r.course_title) map.set(String(r.course_id), String(r.course_title));
+        if (r.course_id) enr.set(String(r.course_id), {
+          enrollment_7th: Number(r.enrollment_7th) || 0,
+          enrollment_8th: Number(r.enrollment_8th) || 0,
+        });
+      }
       setCourseNames(map);
+      setCourseEnrollment(enr);
     });
     fetchTable("fixed_assignments").then(rows => {
       const keys = new Set<string>();
@@ -93,6 +102,7 @@ export default function SchedulePage({ activeTab, scheduleVersion, diagnostics, 
                 fixedKeys={fixedKeys}
                 coteachKeys={coteachKeys}
                 courseNames={courseNames}
+                courseEnrollment={courseEnrollment}
               />
             </>
           )}

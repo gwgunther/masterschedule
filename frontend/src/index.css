@@ -343,6 +343,23 @@ select.cell-input, select.cell-input-narrow {
   white-space: nowrap;
 }
 
+/* ── Schedule Grid Summary Footer ───────────────────────────────── */
+.schedule-summary { border-top: 2px solid #e0ddd5; }
+.summary-label-row td { height: 8px; }
+.summary-spacer td { height: 4px; }
+.summary-row td {
+  font-family: 'Helvetica Neue', Arial, sans-serif;
+  font-size: 11px;
+  color: #666;
+  padding: 2px 8px;
+  white-space: nowrap;
+}
+.summary-label { text-align: right; font-weight: 400; color: #999; }
+.summary-cell { text-align: center; }
+.summary-row-bold td { font-weight: 600; color: #1a1a1a; }
+.summary-pos { color: #166534; }
+.summary-neg { color: #b91c1c; }
+
 .pill-icons {
   display: inline-flex;
   align-items: center;
