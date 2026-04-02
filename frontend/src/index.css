@@ -344,73 +344,65 @@ select.cell-input, select.cell-input-narrow {
   white-space: nowrap;
 }
 
-/* ── Schedule Grid Header Panel ─────────────────────────────────── */
-.grid-header-panel {
-  border-bottom: 2px solid #e0ddd5;
+/* ── Schedule Grid Hero Bar ──────────────────────────────────────── */
+.grid-hero-bar {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  padding: 6px 0;
+  border-bottom: 1px solid #e0ddd5;
   background: #fafaf8;
   flex-shrink: 0;
-}
-
-/* Hero cards (3×3 grid) */
-.grid-hero {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  border-bottom: 1px solid #e0ddd5;
-}
-.grid-hero-card {
-  padding: 10px 16px;
-  border-right: 1px solid #e0ddd5;
   font-family: 'Helvetica Neue', Arial, sans-serif;
+  overflow-x: auto;
 }
-.grid-hero-card:nth-child(3n) { border-right: none; }
-.grid-hero-bold .grid-hero-val { font-weight: 700; }
-.grid-hero-label { font-size: 9px; text-transform: uppercase; letter-spacing: 0.06em; color: #999; margin-bottom: 2px; }
-.grid-hero-val { font-size: 20px; font-weight: 500; color: #1a1a1a; line-height: 1.1; }
-.grid-hero-sub { font-size: 9px; color: #bbb; margin-top: 1px; }
+.grid-hero-bar-item {
+  display: flex;
+  flex-direction: column;
+  padding: 2px 14px;
+  min-width: 0;
+}
+.grid-hero-bar-item.bold .ghb-val { font-weight: 700; }
+.ghb-label { font-size: 9px; text-transform: uppercase; letter-spacing: 0.05em; color: #aaa; white-space: nowrap; }
+.ghb-val { font-size: 15px; font-weight: 500; color: #1a1a1a; line-height: 1.2; }
+.grid-hero-bar-divider { width: 1px; height: 32px; background: #e0ddd5; flex-shrink: 0; margin: 0 4px; }
 
-/* Compact period summary (3 rows) */
-.grid-period-summary {
-  width: 100%;
-  border-collapse: collapse;
+/* ── Schedule Grid Footer ────────────────────────────────────────── */
+.grid-tfoot { border-top: 2px solid #e0ddd5; }
+.tfoot-row td {
   font-family: 'Helvetica Neue', Arial, sans-serif;
   font-size: 10px;
+  padding: 3px 6px;
+  border-top: 1px solid #f0ede8;
 }
-.gps-label-th { width: 80px; }
-.gps-period-th {
-  text-align: center;
-  font-size: 9px;
-  font-weight: 500;
-  color: #aaa;
-  padding: 3px 4px;
-  border-left: 1px solid #e0ddd5;
-}
-.gps-label {
-  padding: 4px 12px 4px 16px;
+.tfoot-label {
+  text-align: right;
   font-size: 9px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: #aaa;
   white-space: nowrap;
-  border-top: 1px solid #f0ede8;
+  padding-right: 10px;
 }
-.gps-cell {
-  text-align: center;
-  padding: 3px 4px;
-  border-left: 1px solid #f0ede8;
-  border-top: 1px solid #f0ede8;
-}
-.gps-grade {
-  display: block;
+.tfoot-cell { text-align: center; }
+.tfoot-trio {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 4px;
   white-space: nowrap;
-  color: #555;
 }
-.gps-g {
-  font-size: 8px;
+.tfoot-sub { color: #777; }
+.tfoot-sep { color: #ddd; font-size: 9px; }
+.tfoot-total { font-weight: 600; color: #1a1a1a; }
+.tfoot-g {
+  font-size: 7px;
   color: #ccc;
   vertical-align: super;
   margin-right: 1px;
 }
+.tfoot-stat-blank { border-left: 1px solid #e0ddd5; }
 
 /* Per-teacher stat columns */
 .teacher-stat-th {
