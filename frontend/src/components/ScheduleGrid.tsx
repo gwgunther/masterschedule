@@ -99,118 +99,7 @@ export default function ScheduleGrid({ sections, teachers, onSelectTeacher, sele
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
 
-      {/* ── Top summary: period table + hero stats ─────────────────────── */}
-      {showSummary && (
-        <div className="grid-top-panel">
-          {/* Period-by-period breakdown */}
-          <table className="gps-table">
-            <thead>
-              <tr>
-                <th className="gps-row-label" />
-                {PERIODS.map(p => <th key={p} className="gps-ph">P{p}</th>)}
-              </tr>
-            </thead>
-            <tbody>
-              {/* Seats row */}
-              <tr>
-                <td className="gps-row-label">Seats</td>
-                {PERIODS.map(p => {
-                  const s7 = periodSeats7.get(p) ?? 0;
-                  const s8 = periodSeats8.get(p) ?? 0;
-                  return (
-                    <td key={p} className="gps-cell">
-                      <span className="tfoot-trio">
-                        <span className="tfoot-sub"><span className="tfoot-g">7</span>{s7}</span>
-                        <span className="tfoot-sep">·</span>
-                        <span className="tfoot-sub"><span className="tfoot-g">8</span>{s8}</span>
-                        <span className="tfoot-sep">·</span>
-                        <span className="tfoot-total">{s7 + s8}</span>
-                      </span>
-                    </td>
-                  );
-                })}
-              </tr>
-              {/* Enrollment row */}
-              <tr>
-                <td className="gps-row-label">Enrollment</td>
-                {PERIODS.map(p => (
-                  <td key={p} className="gps-cell">
-                    <span className="tfoot-trio">
-                      <span className="tfoot-sub"><span className="tfoot-g">7</span>{enroll7}</span>
-                      <span className="tfoot-sep">·</span>
-                      <span className="tfoot-sub"><span className="tfoot-g">8</span>{enroll8}</span>
-                      <span className="tfoot-sep">·</span>
-                      <span className="tfoot-total">{enroll7 + enroll8}</span>
-                    </span>
-                  </td>
-                ))}
-              </tr>
-              {/* Net row */}
-              <tr>
-                <td className="gps-row-label">Net</td>
-                {PERIODS.map(p => {
-                  const d7 = (periodSeats7.get(p) ?? 0) - enroll7;
-                  const d8 = (periodSeats8.get(p) ?? 0) - enroll8;
-                  return (
-                    <td key={p} className="gps-cell">
-                      <span className="tfoot-trio">
-                        <span className={netCls(d7)}><span className="tfoot-g">7</span>{sign(d7)}{d7}</span>
-                        <span className="tfoot-sep">·</span>
-                        <span className={netCls(d8)}><span className="tfoot-g">8</span>{sign(d8)}{d8}</span>
-                        <span className="tfoot-sep">·</span>
-                        <span className={`tfoot-total ${netCls(d7 + d8)}`}>{sign(d7 + d8)}{d7 + d8}</span>
-                      </span>
-                    </td>
-                  );
-                })}
-              </tr>
-            </tbody>
-          </table>
-
-          {/* Hero stat columns */}
-          <div className="gps-hero-cols">
-            {[
-              {
-                label: "Avg Seats / Period",
-                vals: [
-                  { g: "7", v: avgSeats7.toString() },
-                  { g: "8", v: avgSeats8.toString() },
-                  { g: "", v: (avgSeats7 + avgSeats8).toString(), bold: true },
-                ],
-              },
-              {
-                label: "Enrollment",
-                vals: [
-                  { g: "7", v: enroll7.toString() },
-                  { g: "8", v: enroll8.toString() },
-                  { g: "", v: (enroll7 + enroll8).toString(), bold: true },
-                ],
-              },
-              {
-                label: "Net / Period",
-                vals: [
-                  { g: "7", v: (netAvg7 > 0 ? "+" : "") + netAvg7, cls: netCls(netAvg7) },
-                  { g: "8", v: (netAvg8 > 0 ? "+" : "") + netAvg8, cls: netCls(netAvg8) },
-                  { g: "", v: (netAvg7 + netAvg8 > 0 ? "+" : "") + (netAvg7 + netAvg8), cls: netCls(netAvg7 + netAvg8), bold: true },
-                ],
-              },
-            ].map(col => (
-              <div key={col.label} className="gps-hero-col">
-                <div className="gps-hero-col-label">{col.label}</div>
-                <div className="gps-hero-col-vals">
-                  {col.vals.map((v, i) => (
-                    <span key={i} className={`gps-hero-val${v.bold ? " gps-hero-val-bold" : ""} ${v.cls ?? ""}`}>
-                      {v.g && <span className="tfoot-g">{v.g}</span>}{v.v}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* ── Schedule grid ──────────────────────────────────────────────── */}
+      {/* ── Schedule grid (summary rows inline at top for column alignment) ── */}
       <div style={{ flex: 1, overflow: "auto" }}>
         <table className="schedule-table">
           <thead>
@@ -223,6 +112,95 @@ export default function ScheduleGrid({ sections, teachers, onSelectTeacher, sele
               <th className="teacher-stat-th">Total</th>
             </tr>
           </thead>
+
+          {/* Summary rows — inside the table so period columns align exactly */}
+          {showSummary && (
+            <tbody className="summary-tbody">
+              {/* Seats */}
+              <tr className="sum-row">
+                <td className="sum-label">Seats</td>
+                {PERIODS.map(p => {
+                  const s7 = periodSeats7.get(p) ?? 0;
+                  const s8 = periodSeats8.get(p) ?? 0;
+                  return (
+                    <td key={p} className="sum-cell">
+                      <span className="tfoot-trio">
+                        <span className="tfoot-sub"><span className="tfoot-g">7</span>{s7}</span>
+                        <span className="tfoot-sep">·</span>
+                        <span className="tfoot-sub"><span className="tfoot-g">8</span>{s8}</span>
+                        <span className="tfoot-sep">·</span>
+                        <span className="tfoot-total">{s7 + s8}</span>
+                      </span>
+                    </td>
+                  );
+                })}
+                {/* Stacked aggregate — rowspan covers all 3 summary rows */}
+                <td className="sum-agg" colSpan={4} rowSpan={3}>
+                  {[
+                    { label: "Avg Seats / Period", vals: [
+                      { g: "7", v: avgSeats7 }, { g: "8", v: avgSeats8 },
+                      { g: "", v: avgSeats7 + avgSeats8, bold: true },
+                    ]},
+                    { label: "Enrollment", vals: [
+                      { g: "7", v: enroll7 }, { g: "8", v: enroll8 },
+                      { g: "", v: enroll7 + enroll8, bold: true },
+                    ]},
+                    { label: "Net / Period", vals: [
+                      { g: "7", v: netAvg7, net: true }, { g: "8", v: netAvg8, net: true },
+                      { g: "", v: netAvg7 + netAvg8, net: true, bold: true },
+                    ]},
+                  ].map(row => (
+                    <div key={row.label} className="sum-agg-block">
+                      <div className="sum-agg-label">{row.label}</div>
+                      <div className="sum-agg-vals">
+                        {row.vals.map((v, i) => (
+                          <span key={i} className={`sum-agg-val${v.bold ? " sum-agg-bold" : ""}${v.net ? ` ${netCls(v.v)}` : ""}`}>
+                            {v.g && <span className="tfoot-g">{v.g}</span>}
+                            {v.net && v.v !== 0 ? sign(v.v) : ""}{v.v}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </td>
+              </tr>
+              {/* Enrollment */}
+              <tr className="sum-row">
+                <td className="sum-label">Enrollment</td>
+                {PERIODS.map(p => (
+                  <td key={p} className="sum-cell">
+                    <span className="tfoot-trio">
+                      <span className="tfoot-sub"><span className="tfoot-g">7</span>{enroll7}</span>
+                      <span className="tfoot-sep">·</span>
+                      <span className="tfoot-sub"><span className="tfoot-g">8</span>{enroll8}</span>
+                      <span className="tfoot-sep">·</span>
+                      <span className="tfoot-total">{enroll7 + enroll8}</span>
+                    </span>
+                  </td>
+                ))}
+              </tr>
+              {/* Net */}
+              <tr className="sum-row">
+                <td className="sum-label">Net</td>
+                {PERIODS.map(p => {
+                  const d7 = (periodSeats7.get(p) ?? 0) - enroll7;
+                  const d8 = (periodSeats8.get(p) ?? 0) - enroll8;
+                  return (
+                    <td key={p} className="sum-cell">
+                      <span className="tfoot-trio">
+                        <span className={netCls(d7)}><span className="tfoot-g">7</span>{sign(d7)}{d7}</span>
+                        <span className="tfoot-sep">·</span>
+                        <span className={netCls(d8)}><span className="tfoot-g">8</span>{sign(d8)}{d8}</span>
+                        <span className="tfoot-sep">·</span>
+                        <span className={`tfoot-total ${netCls(d7 + d8)}`}>{sign(d7 + d8)}{d7 + d8}</span>
+                      </span>
+                    </td>
+                  );
+                })}
+              </tr>
+            </tbody>
+          )}
+
           <tbody>
             {depts.map(dept => (
               <>

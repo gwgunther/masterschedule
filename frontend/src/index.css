@@ -344,37 +344,26 @@ select.cell-input, select.cell-input-narrow {
   white-space: nowrap;
 }
 
-/* ── Schedule Grid Top Panel (period summary + hero cols) ────────── */
-.grid-top-panel {
-  display: flex;
-  align-items: stretch;
-  border-bottom: 2px solid #e0ddd5;
-  background: #fafaf8;
-  flex-shrink: 0;
+/* ── Schedule Grid Inline Summary Rows ───────────────────────────── */
+.summary-tbody { border-bottom: 2px solid #e0ddd5; }
+
+.sum-row td {
   font-family: 'Helvetica Neue', Arial, sans-serif;
-  overflow-x: auto;
-}
-
-/* Period-by-period table */
-.gps-table {
-  border-collapse: collapse;
   font-size: 10px;
-  flex-shrink: 0;
-}
-.gps-table thead th { padding: 3px 6px; font-size: 9px; font-weight: 500; color: #bbb; text-align: center; }
-.gps-row-label {
-  font-size: 9px; font-weight: 600; text-transform: uppercase;
-  letter-spacing: 0.05em; color: #aaa; text-align: right;
-  padding: 3px 10px 3px 14px; white-space: nowrap;
+  background: #fafaf8;
   border-top: 1px solid #f0ede8;
+  padding: 3px 6px;
 }
-.gps-cell {
-  text-align: center; padding: 3px 6px;
-  border-left: 1px solid #f0ede8;
-  border-top: 1px solid #f0ede8;
+.sum-label {
+  text-align: right;
+  font-size: 9px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.05em;
+  color: #aaa; white-space: nowrap;
+  padding-right: 10px;
 }
+.sum-cell { text-align: center; }
 
-/* Shared trio layout (used in top panel) */
+/* Shared trio layout */
 .tfoot-trio {
   display: inline-flex;
   align-items: baseline;
@@ -384,37 +373,24 @@ select.cell-input, select.cell-input-narrow {
 .tfoot-sub { color: #777; font-size: 10px; }
 .tfoot-sep { color: #ddd; font-size: 8px; }
 .tfoot-total { font-weight: 600; color: #1a1a1a; font-size: 10px; }
-.tfoot-g {
-  font-size: 7px; color: #ccc; vertical-align: super; margin-right: 1px;
-}
+.tfoot-g { font-size: 7px; color: #ccc; vertical-align: super; margin-right: 1px; }
 
-/* Hero stat columns (right side of top panel) */
-.gps-hero-cols {
-  display: flex;
-  align-items: stretch;
-  border-left: 2px solid #e0ddd5;
-  flex-shrink: 0;
+/* Stacked aggregate cell (rowspan=3, right side) */
+.sum-agg {
+  background: #f5f4f0 !important;
+  border-left: 2px solid #e0ddd5 !important;
+  vertical-align: middle;
+  padding: 8px 16px !important;
 }
-.gps-hero-col {
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  padding: 6px 16px;
-  border-right: 1px solid #e0ddd5;
-  min-width: 120px;
+.sum-agg-block { margin-bottom: 6px; }
+.sum-agg-block:last-child { margin-bottom: 0; }
+.sum-agg-label {
+  font-size: 8px; text-transform: uppercase; letter-spacing: 0.06em;
+  color: #bbb; margin-bottom: 2px; white-space: nowrap;
 }
-.gps-hero-col:last-child { border-right: none; }
-.gps-hero-col-label {
-  font-size: 9px; text-transform: uppercase; letter-spacing: 0.05em;
-  color: #aaa; margin-bottom: 4px; white-space: nowrap;
-}
-.gps-hero-col-vals {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-}
-.gps-hero-val { font-size: 13px; font-weight: 400; color: #555; white-space: nowrap; }
-.gps-hero-val-bold { font-weight: 700; color: #1a1a1a; font-size: 14px; }
+.sum-agg-vals { display: flex; align-items: baseline; gap: 8px; }
+.sum-agg-val { font-size: 12px; color: #555; white-space: nowrap; }
+.sum-agg-bold { font-weight: 700; color: #1a1a1a; font-size: 13px; }
 
 /* Per-teacher stat columns */
 .teacher-stat-th {
