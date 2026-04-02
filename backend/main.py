@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import threading
-from typing import Any
+from typing import Any, Optional
 
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
@@ -130,8 +130,8 @@ def create_project(body: ProjectRequest):
 
 
 class ProjectUpdateRequest(BaseModel):
-    name: str | None = None
-    description: str | None = None
+    name: Optional[str] = None
+    description: Optional[str] = None
 
 
 @app.put("/api/projects/{slug}")
@@ -160,7 +160,7 @@ def list_scenarios(slug: str):
 
 class ScenarioRequest(BaseModel):
     name: str
-    clone_from: str | None = None
+    clone_from: Optional[str] = None
     description: str = ""
 
 
