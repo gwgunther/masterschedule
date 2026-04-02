@@ -344,20 +344,97 @@ select.cell-input, select.cell-input-narrow {
   white-space: nowrap;
 }
 
-/* ── Schedule Grid Summary Footer ───────────────────────────────── */
-.schedule-summary { border-top: 2px solid #e0ddd5; }
-.summary-label-row td { height: 8px; }
-.summary-spacer td { height: 4px; }
-.summary-row td {
+/* ── Schedule Grid Header Panel ─────────────────────────────────── */
+.grid-header-panel {
+  border-bottom: 2px solid #e0ddd5;
+  background: #fafaf8;
+  flex-shrink: 0;
+}
+
+/* Hero cards (3×3 grid) */
+.grid-hero {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  border-bottom: 1px solid #e0ddd5;
+}
+.grid-hero-card {
+  padding: 10px 16px;
+  border-right: 1px solid #e0ddd5;
+  font-family: 'Helvetica Neue', Arial, sans-serif;
+}
+.grid-hero-card:nth-child(3n) { border-right: none; }
+.grid-hero-bold .grid-hero-val { font-weight: 700; }
+.grid-hero-label { font-size: 9px; text-transform: uppercase; letter-spacing: 0.06em; color: #999; margin-bottom: 2px; }
+.grid-hero-val { font-size: 20px; font-weight: 500; color: #1a1a1a; line-height: 1.1; }
+.grid-hero-sub { font-size: 9px; color: #bbb; margin-top: 1px; }
+
+/* Compact period summary (3 rows) */
+.grid-period-summary {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: 'Helvetica Neue', Arial, sans-serif;
+  font-size: 10px;
+}
+.gps-label-th { width: 80px; }
+.gps-period-th {
+  text-align: center;
+  font-size: 9px;
+  font-weight: 500;
+  color: #aaa;
+  padding: 3px 4px;
+  border-left: 1px solid #e0ddd5;
+}
+.gps-label {
+  padding: 4px 12px 4px 16px;
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #aaa;
+  white-space: nowrap;
+  border-top: 1px solid #f0ede8;
+}
+.gps-cell {
+  text-align: center;
+  padding: 3px 4px;
+  border-left: 1px solid #f0ede8;
+  border-top: 1px solid #f0ede8;
+}
+.gps-grade {
+  display: block;
+  white-space: nowrap;
+  color: #555;
+}
+.gps-g {
+  font-size: 8px;
+  color: #ccc;
+  vertical-align: super;
+  margin-right: 1px;
+}
+
+/* Per-teacher stat columns */
+.teacher-stat-th {
+  font-size: 10px;
+  color: #888;
+  text-align: right;
+  border-left: 1px solid #e0ddd5;
+  padding: 0 10px;
+  white-space: nowrap;
+}
+.teacher-stat-cell {
+  text-align: right;
+  padding: 4px 10px;
   font-family: 'Helvetica Neue', Arial, sans-serif;
   font-size: 11px;
   color: #666;
-  padding: 2px 8px;
+  border-left: 1px solid #f0ede8;
   white-space: nowrap;
 }
-.summary-label { text-align: right; font-weight: 400; color: #999; }
-.summary-cell { text-align: center; }
-.summary-row-bold td { font-weight: 600; color: #1a1a1a; }
+.teacher-stat-total {
+  font-weight: 600;
+  color: #1a1a1a;
+}
+
 .summary-pos { color: #166534; }
 .summary-neg { color: #b91c1c; }
 

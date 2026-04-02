@@ -23,6 +23,7 @@ interface Props {
 }
 
 const PERIODS = [1, 2, 3, 4, 5, 6, 7];
+const NON_INSTR = new Set(["CONFERENCE", "PROGRESS", "PROGRESSMON", "TITLE1", "COMMUNITY", "COMSCHOOLS", "5CS", "ASB", "ASBRELEASE", "REWARDS", "DLI"]);
 
 function pillClass(dept: string, isConf: boolean): string {
   if (isConf) return "course-pill pill-conf";
@@ -32,15 +33,8 @@ function pillClass(dept: string, isConf: boolean): string {
 
 function deptAbbrev(dept: string): string {
   const map: Record<string, string> = {
-    "ENGLISH": "ENG",
-    "MATH": "MATH",
-    "SCIENCE": "SCI",
-    "SOCIAL SCIENCE": "SOC",
-    "CTE": "CTE",
-    "PE/HEALTH": "PE",
-    "VAPA": "VAPA",
-    "WORLD LANGUAGE": "LANG",
-    "SPED": "SPED",
+    "ENGLISH": "ENG", "MATH": "MATH", "SCIENCE": "SCI", "SOCIAL SCIENCE": "SOC",
+    "CTE": "CTE", "PE/HEALTH": "PE", "VAPA": "VAPA", "WORLD LANGUAGE": "LANG", "SPED": "SPED",
   };
   return map[dept] ?? dept.slice(0, 4);
 }
@@ -49,6 +43,9 @@ function courseLabel(courseId: string, courseNames?: Map<string, string>): strin
   if (!courseNames) return courseId;
   return courseNames.get(courseId) ?? courseId;
 }
+
+function sign(n: number) { return n > 0 ? "+" : ""; }
+function netCls(n: number) { return n > 0 ? "summary-pos" : n < 0 ? "summary-neg" : ""; }
 
 export default function ScheduleGrid({ sections, teachers, onSelectTeacher, selectedTeacherId, fixedKeys, gridLockedKeys, coteachKeys, courseNames, totalStudents, onToggleLock }: Props) {
   // lookup: teacher_id → period → Section
@@ -67,10 +64,7 @@ export default function ScheduleGrid({ sections, teachers, onSelectTeacher, sele
   }
   const depts = [...byDept.keys()].sort();
 
-  // Non-instructional courses don't count toward student seats
-  const NON_INSTR = new Set(["CONFERENCE", "PROGRESS", "PROGRESSMON", "TITLE1", "COMMUNITY", "COMSCHOOLS", "5CS", "ASB", "ASBRELEASE", "REWARDS", "DLI"]);
-
-  // Per-period seat totals (from solver output sections)
+  // Per-period seat totals
   const periodSeats7 = new Map<number, number>();
   const periodSeats8 = new Map<number, number>();
   for (const s of sections) {
@@ -79,141 +73,189 @@ export default function ScheduleGrid({ sections, teachers, onSelectTeacher, sele
     periodSeats8.set(s.period, (periodSeats8.get(s.period) ?? 0) + (s.students_8th ?? 0));
   }
 
-  // Total unique students per grade (every student is in class every period)
-  const totalEnrollment7 = totalStudents?.grade7 ?? 0;
-  const totalEnrollment8 = totalStudents?.grade8 ?? 0;
+  const enroll7 = totalStudents?.grade7 ?? 0;
+  const enroll8 = totalStudents?.grade8 ?? 0;
+
+  // Hero totals: sum across all periods
+  const totalSeats7 = PERIODS.reduce((n, p) => n + (periodSeats7.get(p) ?? 0), 0);
+  const totalSeats8 = PERIODS.reduce((n, p) => n + (periodSeats8.get(p) ?? 0), 0);
+  // Compare total seats to enrollment * 7 (each student needs a seat every period)
+  const neededTotal7 = enroll7 * PERIODS.length;
+  const neededTotal8 = enroll8 * PERIODS.length;
+  const netTotal7 = totalSeats7 - neededTotal7;
+  const netTotal8 = totalSeats8 - neededTotal8;
+
+  const showSummary = sections.length > 0 && !!totalStudents;
+  // Total columns: Teacher + 7 periods + Sections + 7th + 8th + Total = 12
+  const TOTAL_COLS = 1 + PERIODS.length + 4;
 
   return (
-    <div style={{ overflow: "auto", height: "100%" }}>
-      <table className="schedule-table">
-        <thead>
-          <tr>
-            <th style={{ textAlign: "left" }}>Teacher</th>
-            {PERIODS.map(p => <th key={p}>P{p}</th>)}
-          </tr>
-        </thead>
-        <tbody>
-          {depts.map(dept => (
-            <>
-              <tr key={`dept-${dept}`} className="dept-row">
-                <td colSpan={8}>{dept}</td>
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
+
+      {/* ── Hero metrics + period summary ──────────────────────────────── */}
+      {showSummary && (
+        <div className="grid-header-panel">
+          {/* 3×3 hero cards */}
+          <div className="grid-hero">
+            {[
+              { label: "7th Seats", val: totalSeats7, sub: `across ${PERIODS.length} periods` },
+              { label: "8th Seats", val: totalSeats8, sub: `across ${PERIODS.length} periods` },
+              { label: "Total Seats", val: totalSeats7 + totalSeats8, sub: "combined", bold: true },
+              { label: "7th Enrollment", val: enroll7, sub: "unique students" },
+              { label: "8th Enrollment", val: enroll8, sub: "unique students" },
+              { label: "Total Enrollment", val: enroll7 + enroll8, sub: "unique students", bold: true },
+              { label: "Net 7th", val: netTotal7, sub: `vs ${neededTotal7} needed`, net: true },
+              { label: "Net 8th", val: netTotal8, sub: `vs ${neededTotal8} needed`, net: true },
+              { label: "Net Total", val: netTotal7 + netTotal8, sub: "seat surplus / deficit", net: true, bold: true },
+            ].map(({ label, val, sub, net, bold }) => (
+              <div key={label} className={`grid-hero-card${bold ? " grid-hero-bold" : ""}`}>
+                <div className="grid-hero-label">{label}</div>
+                <div className={`grid-hero-val${net ? ` ${netCls(val)}` : ""}`}>
+                  {net && val !== 0 ? sign(val) : ""}{val.toLocaleString()}
+                </div>
+                <div className="grid-hero-sub">{sub}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Compact 3-row period breakdown */}
+          <table className="grid-period-summary">
+            <thead>
+              <tr>
+                <th className="gps-label-th" />
+                {PERIODS.map(p => <th key={p} className="gps-period-th">P{p}</th>)}
               </tr>
-              {byDept.get(dept)!.map(teacher => {
-                const periodMap = lookup.get(teacher.teacher_id);
-                const isSelected = teacher.teacher_id === selectedTeacherId;
-                return (
-                  <tr
-                    key={teacher.teacher_id}
-                    className={isSelected ? "selected" : ""}
-                    onClick={() => onSelectTeacher(teacher)}
-                  >
-                    <td>
-                      <span style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-                        <span>{teacher.full_name || teacher.teacher_id}</span>
-                        <span className="dept-badge">{deptAbbrev(teacher.department)}</span>
-                      </span>
+            </thead>
+            <tbody>
+              <tr>
+                <td className="gps-label">Seats</td>
+                {PERIODS.map(p => (
+                  <td key={p} className="gps-cell">
+                    <span className="gps-grade"><span className="gps-g">7</span>{periodSeats7.get(p) ?? 0}</span>
+                    <span className="gps-grade"><span className="gps-g">8</span>{periodSeats8.get(p) ?? 0}</span>
+                  </td>
+                ))}
+              </tr>
+              <tr>
+                <td className="gps-label">Enrollment</td>
+                {PERIODS.map(p => (
+                  <td key={p} className="gps-cell">
+                    <span className="gps-grade"><span className="gps-g">7</span>{enroll7}</span>
+                    <span className="gps-grade"><span className="gps-g">8</span>{enroll8}</span>
+                  </td>
+                ))}
+              </tr>
+              <tr>
+                <td className="gps-label">Net</td>
+                {PERIODS.map(p => {
+                  const d7 = (periodSeats7.get(p) ?? 0) - enroll7;
+                  const d8 = (periodSeats8.get(p) ?? 0) - enroll8;
+                  return (
+                    <td key={p} className="gps-cell">
+                      <span className={`gps-grade ${netCls(d7)}`}><span className="gps-g">7</span>{sign(d7)}{d7}</span>
+                      <span className={`gps-grade ${netCls(d8)}`}><span className="gps-g">8</span>{sign(d8)}{d8}</span>
                     </td>
-                    {PERIODS.map(p => {
-                      const sec = periodMap?.get(p);
-                      if (!sec) {
-                        return <td key={p} className="period-cell"><span className="pill-empty">—</span></td>;
-                      }
-                      const isConf = sec.course_id === "CONFERENCE";
-                      const key = `${sec.teacher_id}|${sec.course_id}|${sec.period}`;
-                      const isDataLocked = fixedKeys?.has(key) && !gridLockedKeys?.has(key);
-                      const isGridLocked = gridLockedKeys?.has(key);
-                      const isCoteach = coteachKeys?.has(`${sec.teacher_id}|${sec.course_id}`);
-                      const isLockable = !!onToggleLock && !isDataLocked;
-                      return (
-                        <td
-                          key={p}
-                          className={`period-cell${isGridLocked ? " grid-locked" : ""}${isLockable ? " lockable" : ""}`}
-                          onClick={isLockable ? (e) => { e.stopPropagation(); onToggleLock(sec.teacher_id, sec.course_id, sec.period); } : undefined}
-                          title={isDataLocked ? "Locked in data table" : isGridLocked ? "Click to unlock" : isLockable ? "Click to lock" : undefined}
-                        >
-                          <span className="period-cell-inner">
-                            <span className={pillClass(teacher.department, isConf)}>
-                              {isConf ? "Conference" : courseLabel(sec.course_id, courseNames)}
+                  );
+                })}
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* ── Schedule grid ──────────────────────────────────────────────── */}
+      <div style={{ flex: 1, overflow: "auto" }}>
+        <table className="schedule-table">
+          <thead>
+            <tr>
+              <th style={{ textAlign: "left" }}>Teacher</th>
+              {PERIODS.map(p => <th key={p}>P{p}</th>)}
+              <th className="teacher-stat-th">Sections</th>
+              <th className="teacher-stat-th">7th Seats</th>
+              <th className="teacher-stat-th">8th Seats</th>
+              <th className="teacher-stat-th">Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            {depts.map(dept => (
+              <>
+                <tr key={`dept-${dept}`} className="dept-row">
+                  <td colSpan={TOTAL_COLS}>{dept}</td>
+                </tr>
+                {byDept.get(dept)!.map(teacher => {
+                  const periodMap = lookup.get(teacher.teacher_id);
+                  const isSelected = teacher.teacher_id === selectedTeacherId;
+                  const instructional = sections.filter(
+                    s => s.teacher_id === teacher.teacher_id && !NON_INSTR.has(s.course_id)
+                  );
+                  const tSeats7 = instructional.reduce((n, s) => n + (s.students_7th ?? 0), 0);
+                  const tSeats8 = instructional.reduce((n, s) => n + (s.students_8th ?? 0), 0);
+
+                  return (
+                    <tr
+                      key={teacher.teacher_id}
+                      className={isSelected ? "selected" : ""}
+                      onClick={() => onSelectTeacher(teacher)}
+                    >
+                      <td>
+                        <span style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                          <span>{teacher.full_name || teacher.teacher_id}</span>
+                          <span className="dept-badge">{deptAbbrev(teacher.department)}</span>
+                        </span>
+                      </td>
+                      {PERIODS.map(p => {
+                        const sec = periodMap?.get(p);
+                        if (!sec) {
+                          return <td key={p} className="period-cell"><span className="pill-empty">—</span></td>;
+                        }
+                        const isConf = sec.course_id === "CONFERENCE";
+                        const key = `${sec.teacher_id}|${sec.course_id}|${sec.period}`;
+                        const isDataLocked = fixedKeys?.has(key) && !gridLockedKeys?.has(key);
+                        const isGridLocked = gridLockedKeys?.has(key);
+                        const isCoteach = coteachKeys?.has(`${sec.teacher_id}|${sec.course_id}`);
+                        const isLockable = !!onToggleLock && !isDataLocked;
+                        return (
+                          <td
+                            key={p}
+                            className={`period-cell${isGridLocked ? " grid-locked" : ""}${isLockable ? " lockable" : ""}`}
+                            onClick={isLockable ? (e) => { e.stopPropagation(); onToggleLock(sec.teacher_id, sec.course_id, sec.period); } : undefined}
+                            title={isDataLocked ? "Locked in data table" : isGridLocked ? "Click to unlock" : isLockable ? "Click to lock" : undefined}
+                          >
+                            <span className="period-cell-inner">
+                              <span className={pillClass(teacher.department, isConf)}>
+                                {isConf ? "Conference" : courseLabel(sec.course_id, courseNames)}
+                              </span>
+                              {!isConf && sec.total_students != null && sec.total_students > 0 && (
+                                <span className="pill-students">
+                                  {sec.students_7th != null && sec.students_8th != null
+                                    ? <><span className="pill-grade-label">7</span>{sec.students_7th}<span className="pill-grade-sep"> · </span><span className="pill-grade-label">8</span>{sec.students_8th}</>
+                                    : `${sec.total_students}`}
+                                </span>
+                              )}
+                              {(isDataLocked || isGridLocked || isCoteach) && (
+                                <span className="pill-icons">
+                                  {isDataLocked && <LockIcon className="pill-icon-data" />}
+                                  {isGridLocked && <GridLockIcon />}
+                                  {isCoteach && <CoteachIcon />}
+                                </span>
+                              )}
                             </span>
-                            {!isConf && sec.total_students != null && sec.total_students > 0 && (
-                              <span className="pill-students">
-                                {sec.students_7th != null && sec.students_8th != null
-                                  ? <><span className="pill-grade-label">7</span>{sec.students_7th}<span className="pill-grade-sep"> · </span><span className="pill-grade-label">8</span>{sec.students_8th}</>
-                                  : `${sec.total_students}`}
-                              </span>
-                            )}
-                            {(isDataLocked || isGridLocked || isCoteach) && (
-                              <span className="pill-icons">
-                                {isDataLocked && <LockIcon className="pill-icon-data" />}
-                                {isGridLocked && <GridLockIcon />}
-                                {isCoteach && <CoteachIcon />}
-                              </span>
-                            )}
-                          </span>
-                        </td>
-                      );
-                    })}
-                  </tr>
-                );
-              })}
-            </>
-          ))}
-        </tbody>
-        {sections.length > 0 && totalStudents && (
-          <tfoot className="schedule-summary">
-            <tr className="summary-label-row">
-              <td colSpan={8} />
-            </tr>
-            <tr className="summary-row">
-              <td className="summary-label">Seats (7th)</td>
-              {PERIODS.map(p => <td key={p} className="summary-cell">{periodSeats7.get(p) ?? 0}</td>)}
-            </tr>
-            <tr className="summary-row">
-              <td className="summary-label">Seats (8th)</td>
-              {PERIODS.map(p => <td key={p} className="summary-cell">{periodSeats8.get(p) ?? 0}</td>)}
-            </tr>
-            <tr className="summary-row summary-row-bold">
-              <td className="summary-label">Seats (total)</td>
-              {PERIODS.map(p => <td key={p} className="summary-cell">{(periodSeats7.get(p) ?? 0) + (periodSeats8.get(p) ?? 0)}</td>)}
-            </tr>
-            <tr className="summary-spacer"><td colSpan={8} /></tr>
-            <tr className="summary-row">
-              <td className="summary-label">Enrollment (7th)</td>
-              {PERIODS.map(p => <td key={p} className="summary-cell">{totalEnrollment7}</td>)}
-            </tr>
-            <tr className="summary-row">
-              <td className="summary-label">Enrollment (8th)</td>
-              {PERIODS.map(p => <td key={p} className="summary-cell">{totalEnrollment8}</td>)}
-            </tr>
-            <tr className="summary-row summary-row-bold">
-              <td className="summary-label">Enrollment (total)</td>
-              {PERIODS.map(p => <td key={p} className="summary-cell">{totalEnrollment7 + totalEnrollment8}</td>)}
-            </tr>
-            <tr className="summary-spacer"><td colSpan={8} /></tr>
-            <tr className="summary-row">
-              <td className="summary-label">Net (7th)</td>
-              {PERIODS.map(p => {
-                const diff = (periodSeats7.get(p) ?? 0) - totalEnrollment7;
-                return <td key={p} className={`summary-cell ${diff > 0 ? "summary-pos" : diff < 0 ? "summary-neg" : ""}`}>{diff > 0 ? "+" : ""}{diff}</td>;
-              })}
-            </tr>
-            <tr className="summary-row">
-              <td className="summary-label">Net (8th)</td>
-              {PERIODS.map(p => {
-                const diff = (periodSeats8.get(p) ?? 0) - totalEnrollment8;
-                return <td key={p} className={`summary-cell ${diff > 0 ? "summary-pos" : diff < 0 ? "summary-neg" : ""}`}>{diff > 0 ? "+" : ""}{diff}</td>;
-              })}
-            </tr>
-            <tr className="summary-row summary-row-bold">
-              <td className="summary-label">Net (total)</td>
-              {PERIODS.map(p => {
-                const diff = (periodSeats7.get(p) ?? 0) + (periodSeats8.get(p) ?? 0) - totalEnrollment7 - totalEnrollment8;
-                return <td key={p} className={`summary-cell ${diff > 0 ? "summary-pos" : diff < 0 ? "summary-neg" : ""}`}>{diff > 0 ? "+" : ""}{diff}</td>;
-              })}
-            </tr>
-          </tfoot>
-        )}
-      </table>
+                          </td>
+                        );
+                      })}
+                      {/* Per-teacher stats */}
+                      <td className="teacher-stat-cell">{instructional.length || "—"}</td>
+                      <td className="teacher-stat-cell">{tSeats7 || "—"}</td>
+                      <td className="teacher-stat-cell">{tSeats8 || "—"}</td>
+                      <td className="teacher-stat-cell teacher-stat-total">{(tSeats7 + tSeats8) || "—"}</td>
+                    </tr>
+                  );
+                })}
+              </>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

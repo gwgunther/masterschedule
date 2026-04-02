@@ -38,7 +38,7 @@ const SETUP_TABLES: { name: TableName; label: string }[] = [
   { name: "course_conflicts", label: "Course Conflicts" },
 ];
 
-type ScheduleTab = "schedule" | "list" | "diagnostics" | "validation";
+type ScheduleTab = "schedule" | "diagnostics" | "validation";
 
 type ActiveView =
   | { mode: "setup"; table: TableName }
@@ -145,12 +145,7 @@ export default function App() {
               >
                 Schedule Grid
               </button>
-              <button
-                className={`sidebar-nav-item${activeScheduleTab === "list" ? " active" : ""}`}
-                onClick={() => setView({ mode: "schedule", tab: "list" })}
-              >
-                Schedule List
-              </button>
+
               {hasDiagnostics && (
                 <button
                   className={`sidebar-nav-item${activeScheduleTab === "diagnostics" ? " active" : ""}`}

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import ScheduleGrid from "../components/ScheduleGrid";
-import ScheduleList from "../components/ScheduleList";
+
 import ValidationPanel from "../components/ValidationPanel";
 import DiagnosticsPanel from "../components/DiagnosticsPanel";
 import { fetchSchedule, fetchTable, fetchContext, fetchProjectSettings, toggleGridLock, clearGridLocks } from "../api";
@@ -14,7 +14,7 @@ interface Teacher {
 }
 
 interface Props {
-  activeTab: "schedule" | "list" | "diagnostics" | "validation";
+  activeTab: "schedule" | "diagnostics" | "validation";
   /** Increments when solver finishes — triggers data reload */
   scheduleVersion: number;
   diagnostics: DiagnosticGroup[] | null;
@@ -154,26 +154,6 @@ export default function SchedulePage({ activeTab, scheduleVersion, diagnostics, 
                 onToggleLock={handleToggleLock}
               />
             </>
-          )}
-        </div>
-      )}
-
-      {activeTab === "list" && (
-        <div style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column" }}>
-          {!scheduleExists ? (
-            <div className="empty-state">
-              <div style={{ fontSize: 32, marginBottom: 4 }}>—</div>
-              <div className="empty-state-title">No schedule generated yet</div>
-              <div className="empty-state-sub">Click Run Solver to produce a schedule</div>
-            </div>
-          ) : (
-            <ScheduleList
-              sections={sections}
-              teachers={teachers}
-              courseNames={courseNames}
-              courseEnrollment={courseEnrollment}
-              totalStudents={totalStudents}
-            />
           )}
         </div>
       )}
