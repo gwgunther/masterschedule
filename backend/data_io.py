@@ -1,9 +1,11 @@
 """SQLite data access layer — parameterized for project/scenario support.
 
+
 All read/write functions accept db_path and scenario_id so callers
 (main.py, project_manager.py) control which project + scenario is active.
 Run management functions accept runs_dir for the same reason.
 """
+from __future__ import annotations
 
 import csv
 import io

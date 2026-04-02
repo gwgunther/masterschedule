@@ -6,6 +6,7 @@ Layout:
     schedule.db        — all scenarios' data
     runs/{scenario}/   — solver run directories
 """
+from __future__ import annotations
 
 import json
 import re

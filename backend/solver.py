@@ -2,6 +2,7 @@
 Master Schedule Solver — PuLP MILP formulation.
 Updated for 26-27 data schemas.
 """
+from __future__ import annotations
 
 import math
 import time
