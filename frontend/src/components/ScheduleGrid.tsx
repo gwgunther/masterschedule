@@ -99,33 +99,114 @@ export default function ScheduleGrid({ sections, teachers, onSelectTeacher, sele
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
 
-      {/* ── Compact hero bar ───────────────────────────────────────────── */}
+      {/* ── Top summary: period table + hero stats ─────────────────────── */}
       {showSummary && (
-        <div className="grid-hero-bar">
-          {[
-            { label: "Avg 7th Seats / Period", val: avgSeats7 },
-            { label: "Avg 8th Seats / Period", val: avgSeats8 },
-            { label: "Avg Total / Period", val: avgSeats7 + avgSeats8, bold: true },
-            null,
-            { label: "7th Enrollment", val: enroll7 },
-            { label: "8th Enrollment", val: enroll8 },
-            { label: "Total Enrollment", val: enroll7 + enroll8, bold: true },
-            null,
-            { label: "Net 7th / Period", val: netAvg7, net: true },
-            { label: "Net 8th / Period", val: netAvg8, net: true },
-            { label: "Net Total / Period", val: netAvg7 + netAvg8, net: true, bold: true },
-          ].map((item, i) =>
-            item === null
-              ? <div key={`div-${i}`} className="grid-hero-bar-divider" />
-              : (
-                <div key={item.label} className={`grid-hero-bar-item${item.bold ? " bold" : ""}`}>
-                  <div className="ghb-label">{item.label}</div>
-                  <div className={`ghb-val${item.net ? ` ${netCls(item.val)}` : ""}`}>
-                    {item.net && item.val !== 0 ? sign(item.val) : ""}{item.val.toLocaleString()}
-                  </div>
+        <div className="grid-top-panel">
+          {/* Period-by-period breakdown */}
+          <table className="gps-table">
+            <thead>
+              <tr>
+                <th className="gps-row-label" />
+                {PERIODS.map(p => <th key={p} className="gps-ph">P{p}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {/* Seats row */}
+              <tr>
+                <td className="gps-row-label">Seats</td>
+                {PERIODS.map(p => {
+                  const s7 = periodSeats7.get(p) ?? 0;
+                  const s8 = periodSeats8.get(p) ?? 0;
+                  return (
+                    <td key={p} className="gps-cell">
+                      <span className="tfoot-trio">
+                        <span className="tfoot-sub"><span className="tfoot-g">7</span>{s7}</span>
+                        <span className="tfoot-sep">·</span>
+                        <span className="tfoot-sub"><span className="tfoot-g">8</span>{s8}</span>
+                        <span className="tfoot-sep">·</span>
+                        <span className="tfoot-total">{s7 + s8}</span>
+                      </span>
+                    </td>
+                  );
+                })}
+              </tr>
+              {/* Enrollment row */}
+              <tr>
+                <td className="gps-row-label">Enrollment</td>
+                {PERIODS.map(p => (
+                  <td key={p} className="gps-cell">
+                    <span className="tfoot-trio">
+                      <span className="tfoot-sub"><span className="tfoot-g">7</span>{enroll7}</span>
+                      <span className="tfoot-sep">·</span>
+                      <span className="tfoot-sub"><span className="tfoot-g">8</span>{enroll8}</span>
+                      <span className="tfoot-sep">·</span>
+                      <span className="tfoot-total">{enroll7 + enroll8}</span>
+                    </span>
+                  </td>
+                ))}
+              </tr>
+              {/* Net row */}
+              <tr>
+                <td className="gps-row-label">Net</td>
+                {PERIODS.map(p => {
+                  const d7 = (periodSeats7.get(p) ?? 0) - enroll7;
+                  const d8 = (periodSeats8.get(p) ?? 0) - enroll8;
+                  return (
+                    <td key={p} className="gps-cell">
+                      <span className="tfoot-trio">
+                        <span className={netCls(d7)}><span className="tfoot-g">7</span>{sign(d7)}{d7}</span>
+                        <span className="tfoot-sep">·</span>
+                        <span className={netCls(d8)}><span className="tfoot-g">8</span>{sign(d8)}{d8}</span>
+                        <span className="tfoot-sep">·</span>
+                        <span className={`tfoot-total ${netCls(d7 + d8)}`}>{sign(d7 + d8)}{d7 + d8}</span>
+                      </span>
+                    </td>
+                  );
+                })}
+              </tr>
+            </tbody>
+          </table>
+
+          {/* Hero stat columns */}
+          <div className="gps-hero-cols">
+            {[
+              {
+                label: "Avg Seats / Period",
+                vals: [
+                  { g: "7", v: avgSeats7.toString() },
+                  { g: "8", v: avgSeats8.toString() },
+                  { g: "", v: (avgSeats7 + avgSeats8).toString(), bold: true },
+                ],
+              },
+              {
+                label: "Enrollment",
+                vals: [
+                  { g: "7", v: enroll7.toString() },
+                  { g: "8", v: enroll8.toString() },
+                  { g: "", v: (enroll7 + enroll8).toString(), bold: true },
+                ],
+              },
+              {
+                label: "Net / Period",
+                vals: [
+                  { g: "7", v: (netAvg7 > 0 ? "+" : "") + netAvg7, cls: netCls(netAvg7) },
+                  { g: "8", v: (netAvg8 > 0 ? "+" : "") + netAvg8, cls: netCls(netAvg8) },
+                  { g: "", v: (netAvg7 + netAvg8 > 0 ? "+" : "") + (netAvg7 + netAvg8), cls: netCls(netAvg7 + netAvg8), bold: true },
+                ],
+              },
+            ].map(col => (
+              <div key={col.label} className="gps-hero-col">
+                <div className="gps-hero-col-label">{col.label}</div>
+                <div className="gps-hero-col-vals">
+                  {col.vals.map((v, i) => (
+                    <span key={i} className={`gps-hero-val${v.bold ? " gps-hero-val-bold" : ""} ${v.cls ?? ""}`}>
+                      {v.g && <span className="tfoot-g">{v.g}</span>}{v.v}
+                    </span>
+                  ))}
                 </div>
-              )
-          )}
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
@@ -220,56 +301,6 @@ export default function ScheduleGrid({ sections, teachers, onSelectTeacher, sele
               </>
             ))}
           </tbody>
-          {/* ── Footer: Seats / Enrollment / Net — 7th · 8th · Total side-by-side ── */}
-          {showSummary && (
-            <tfoot className="grid-tfoot">
-              {[
-                {
-                  label: "Seats",
-                  cells: PERIODS.map(p => {
-                    const s7 = periodSeats7.get(p) ?? 0;
-                    const s8 = periodSeats8.get(p) ?? 0;
-                    return { v7: s7, v8: s8, vt: s7 + s8 };
-                  }),
-                },
-                {
-                  label: "Enrollment",
-                  cells: PERIODS.map(() => ({ v7: enroll7, v8: enroll8, vt: enroll7 + enroll8 })),
-                },
-                {
-                  label: "Net",
-                  cells: PERIODS.map(p => {
-                    const d7 = (periodSeats7.get(p) ?? 0) - enroll7;
-                    const d8 = (periodSeats8.get(p) ?? 0) - enroll8;
-                    return { v7: d7, v8: d8, vt: d7 + d8, net: true };
-                  }),
-                },
-              ].map(({ label, cells }) => (
-                <tr key={label} className="tfoot-row">
-                  <td className="tfoot-label">{label}</td>
-                  {cells.map((c, i) => (
-                    <td key={i} className="tfoot-cell">
-                      <span className="tfoot-trio">
-                        <span className={c.net ? netCls(c.v7) : "tfoot-sub"}>
-                          <span className="tfoot-g">7</span>{c.net && c.v7 !== 0 ? sign(c.v7) : ""}{c.v7}
-                        </span>
-                        <span className="tfoot-sep">·</span>
-                        <span className={c.net ? netCls(c.v8) : "tfoot-sub"}>
-                          <span className="tfoot-g">8</span>{c.net && c.v8 !== 0 ? sign(c.v8) : ""}{c.v8}
-                        </span>
-                        <span className="tfoot-sep">·</span>
-                        <span className={`tfoot-total${c.net ? ` ${netCls(c.vt)}` : ""}`}>
-                          {c.net && c.vt !== 0 ? sign(c.vt) : ""}{c.vt}
-                        </span>
-                      </span>
-                    </td>
-                  ))}
-                  {/* Span the 4 stat columns */}
-                  <td colSpan={4} className="tfoot-stat-blank" />
-                </tr>
-              ))}
-            </tfoot>
-          )}
         </table>
       </div>
     </div>

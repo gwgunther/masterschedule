@@ -344,65 +344,77 @@ select.cell-input, select.cell-input-narrow {
   white-space: nowrap;
 }
 
-/* ── Schedule Grid Hero Bar ──────────────────────────────────────── */
-.grid-hero-bar {
+/* ── Schedule Grid Top Panel (period summary + hero cols) ────────── */
+.grid-top-panel {
   display: flex;
-  align-items: center;
-  gap: 0;
-  padding: 6px 0;
-  border-bottom: 1px solid #e0ddd5;
+  align-items: stretch;
+  border-bottom: 2px solid #e0ddd5;
   background: #fafaf8;
   flex-shrink: 0;
   font-family: 'Helvetica Neue', Arial, sans-serif;
   overflow-x: auto;
 }
-.grid-hero-bar-item {
-  display: flex;
-  flex-direction: column;
-  padding: 2px 14px;
-  min-width: 0;
-}
-.grid-hero-bar-item.bold .ghb-val { font-weight: 700; }
-.ghb-label { font-size: 9px; text-transform: uppercase; letter-spacing: 0.05em; color: #aaa; white-space: nowrap; }
-.ghb-val { font-size: 15px; font-weight: 500; color: #1a1a1a; line-height: 1.2; }
-.grid-hero-bar-divider { width: 1px; height: 32px; background: #e0ddd5; flex-shrink: 0; margin: 0 4px; }
 
-/* ── Schedule Grid Footer ────────────────────────────────────────── */
-.grid-tfoot { border-top: 2px solid #e0ddd5; }
-.tfoot-row td {
-  font-family: 'Helvetica Neue', Arial, sans-serif;
+/* Period-by-period table */
+.gps-table {
+  border-collapse: collapse;
   font-size: 10px;
-  padding: 3px 6px;
+  flex-shrink: 0;
+}
+.gps-table thead th { padding: 3px 6px; font-size: 9px; font-weight: 500; color: #bbb; text-align: center; }
+.gps-row-label {
+  font-size: 9px; font-weight: 600; text-transform: uppercase;
+  letter-spacing: 0.05em; color: #aaa; text-align: right;
+  padding: 3px 10px 3px 14px; white-space: nowrap;
   border-top: 1px solid #f0ede8;
 }
-.tfoot-label {
-  text-align: right;
-  font-size: 9px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: #aaa;
-  white-space: nowrap;
-  padding-right: 10px;
+.gps-cell {
+  text-align: center; padding: 3px 6px;
+  border-left: 1px solid #f0ede8;
+  border-top: 1px solid #f0ede8;
 }
-.tfoot-cell { text-align: center; }
+
+/* Shared trio layout (used in top panel) */
 .tfoot-trio {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 3px;
+  white-space: nowrap;
+}
+.tfoot-sub { color: #777; font-size: 10px; }
+.tfoot-sep { color: #ddd; font-size: 8px; }
+.tfoot-total { font-weight: 600; color: #1a1a1a; font-size: 10px; }
+.tfoot-g {
+  font-size: 7px; color: #ccc; vertical-align: super; margin-right: 1px;
+}
+
+/* Hero stat columns (right side of top panel) */
+.gps-hero-cols {
+  display: flex;
+  align-items: stretch;
+  border-left: 2px solid #e0ddd5;
+  flex-shrink: 0;
+}
+.gps-hero-col {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 6px 16px;
+  border-right: 1px solid #e0ddd5;
+  min-width: 120px;
+}
+.gps-hero-col:last-child { border-right: none; }
+.gps-hero-col-label {
+  font-size: 9px; text-transform: uppercase; letter-spacing: 0.05em;
+  color: #aaa; margin-bottom: 4px; white-space: nowrap;
+}
+.gps-hero-col-vals {
   display: flex;
   align-items: baseline;
-  justify-content: center;
-  gap: 4px;
-  white-space: nowrap;
+  gap: 8px;
 }
-.tfoot-sub { color: #777; }
-.tfoot-sep { color: #ddd; font-size: 9px; }
-.tfoot-total { font-weight: 600; color: #1a1a1a; }
-.tfoot-g {
-  font-size: 7px;
-  color: #ccc;
-  vertical-align: super;
-  margin-right: 1px;
-}
-.tfoot-stat-blank { border-left: 1px solid #e0ddd5; }
+.gps-hero-val { font-size: 13px; font-weight: 400; color: #555; white-space: nowrap; }
+.gps-hero-val-bold { font-weight: 700; color: #1a1a1a; font-size: 14px; }
 
 /* Per-teacher stat columns */
 .teacher-stat-th {
