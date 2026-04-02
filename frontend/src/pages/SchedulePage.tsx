@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import ScheduleGrid from "../components/ScheduleGrid";
 import ValidationPanel from "../components/ValidationPanel";
 import DiagnosticsPanel from "../components/DiagnosticsPanel";
-import { fetchSchedule, fetchTable } from "../api";
+import { fetchSchedule, fetchTable, fetchContext, fetchProjectSettings } from "../api";
 import type { Section, DiagnosticGroup } from "../api";
 
 interface Teacher {
@@ -55,15 +55,15 @@ export default function SchedulePage({ activeTab, scheduleVersion, diagnostics, 
       }
       setCourseNames(map);
       setCourseEnrollment(enr);
-      // Unique students per grade = total course-enrollments / 7 periods
-      const NON_INSTR = new Set(["CONFERENCE", "PROGRESS", "PROGRESSMON", "TITLE1", "COMMUNITY", "COMSCHOOLS", "5CS", "ASB", "ASBRELEASE", "REWARDS", "DLI"]);
-      let sum7 = 0, sum8 = 0;
-      for (const r of rows) {
-        if (!r.course_id || NON_INSTR.has(String(r.course_id))) continue;
-        sum7 += Number(r.enrollment_7th) || 0;
-        sum8 += Number(r.enrollment_8th) || 0;
-      }
-      setTotalStudents({ grade7: Math.round(sum7 / 7), grade8: Math.round(sum8 / 7) });
+    });
+    // Load total students from project settings
+    fetchContext().then(ctx => {
+      if (!ctx.project) return;
+      fetchProjectSettings(ctx.project).then(settings => {
+        if (settings.total_students_7th != null && settings.total_students_8th != null) {
+          setTotalStudents({ grade7: Number(settings.total_students_7th), grade8: Number(settings.total_students_8th) });
+        }
+      });
     });
     fetchTable("fixed_assignments").then(rows => {
       const keys = new Set<string>();

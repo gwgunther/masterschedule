@@ -127,6 +127,22 @@ def update_project(slug: str, name: str | None = None, description: str | None =
     return meta
 
 
+def get_settings(slug: str) -> dict:
+    meta_path = project_dir(slug) / "project.json"
+    if not meta_path.exists():
+        return {}
+    meta = json.loads(meta_path.read_text())
+    return meta.get("settings", {})
+
+
+def update_settings(slug: str, settings: dict) -> dict:
+    meta_path = project_dir(slug) / "project.json"
+    meta = json.loads(meta_path.read_text())
+    meta["settings"] = {**meta.get("settings", {}), **settings}
+    meta_path.write_text(json.dumps(meta, indent=2))
+    return meta["settings"]
+
+
 def delete_project(slug: str) -> None:
     pdir = project_dir(slug)
     if not pdir.is_dir():

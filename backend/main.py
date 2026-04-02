@@ -141,6 +141,16 @@ def update_project(slug: str, body: ProjectUpdateRequest):
         raise HTTPException(status_code=404, detail=str(e))
 
 
+@app.get("/api/projects/{slug}/settings")
+def get_project_settings(slug: str):
+    return project_manager.get_settings(slug)
+
+
+@app.put("/api/projects/{slug}/settings")
+def update_project_settings(slug: str, body: dict):
+    return project_manager.update_settings(slug, body)
+
+
 @app.delete("/api/projects/{slug}")
 def delete_project(slug: str):
     try:
