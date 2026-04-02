@@ -387,6 +387,8 @@ select.cell-input, select.cell-input-narrow {
 /* Grid-locked cells */
 .period-cell.grid-locked {
   background: #eff6ff;
+  outline: 1px solid #93c5fd;
+  outline-offset: -1px;
 }
 
 /* Lockable cells show pointer cursor */
