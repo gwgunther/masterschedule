@@ -327,13 +327,14 @@ select.cell-input, select.cell-input-narrow {
   font-family: 'Helvetica Neue', Arial, sans-serif;
   font-size: 10px; letter-spacing: 0.03em;
   padding: 3px 7px; border-radius: 3px;
-  white-space: nowrap; border: 1px solid transparent;
+  white-space: normal; border: 1px solid transparent;
 }
 
 .period-cell-inner {
   display: inline-flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 3px;
+  flex-wrap: wrap;
 }
 
 .pill-students {

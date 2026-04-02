@@ -47,9 +47,7 @@ function deptAbbrev(dept: string): string {
 
 function courseLabel(courseId: string, courseNames?: Map<string, string>): string {
   if (!courseNames) return courseId;
-  const title = courseNames.get(courseId);
-  if (!title) return courseId;
-  return title.length > 14 ? title.slice(0, 13) + "…" : title;
+  return courseNames.get(courseId) ?? courseId;
 }
 
 export default function ScheduleGrid({ sections, teachers, onSelectTeacher, selectedTeacherId, fixedKeys, gridLockedKeys, coteachKeys, courseNames, totalStudents, onToggleLock }: Props) {
