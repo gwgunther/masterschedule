@@ -16,6 +16,8 @@ interface Props {
   coteachKeys?: Set<string>;
   courseNames?: Map<string, string>;
   courseEnrollment?: Map<string, { enrollment_7th: number; enrollment_8th: number }>;
+  /** Total unique students per grade (not course-enrollment sums) */
+  totalStudents?: { grade7: number; grade8: number };
 }
 
 const PERIODS = [1, 2, 3, 4, 5, 6, 7];
@@ -48,7 +50,7 @@ function courseLabel(courseId: string, courseNames?: Map<string, string>): strin
   return title.length > 14 ? title.slice(0, 13) + "…" : title;
 }
 
-export default function ScheduleGrid({ sections, teachers, onSelectTeacher, selectedTeacherId, fixedKeys, coteachKeys, courseNames, courseEnrollment }: Props) {
+export default function ScheduleGrid({ sections, teachers, onSelectTeacher, selectedTeacherId, fixedKeys, coteachKeys, courseNames, courseEnrollment, totalStudents }: Props) {
   // lookup: teacher_id → period → Section
   const lookup = new Map<string, Map<number, Section>>();
   for (const s of sections) {
@@ -77,16 +79,9 @@ export default function ScheduleGrid({ sections, teachers, onSelectTeacher, sele
     periodSeats8.set(s.period, (periodSeats8.get(s.period) ?? 0) + (s.students_8th ?? 0));
   }
 
-  // Total enrollment from courses table (same every period)
-  let totalEnrollment7 = 0;
-  let totalEnrollment8 = 0;
-  if (courseEnrollment) {
-    for (const [cid, enr] of courseEnrollment) {
-      if (NON_INSTR.has(cid)) continue;
-      totalEnrollment7 += enr.enrollment_7th;
-      totalEnrollment8 += enr.enrollment_8th;
-    }
-  }
+  // Total unique students per grade (every student is in class every period)
+  const totalEnrollment7 = totalStudents?.grade7 ?? 0;
+  const totalEnrollment8 = totalStudents?.grade8 ?? 0;
 
   return (
     <div style={{ overflow: "auto", height: "100%" }}>
@@ -155,7 +150,7 @@ export default function ScheduleGrid({ sections, teachers, onSelectTeacher, sele
             </>
           ))}
         </tbody>
-        {sections.length > 0 && courseEnrollment && courseEnrollment.size > 0 && (
+        {sections.length > 0 && totalStudents && (
           <tfoot className="schedule-summary">
             <tr className="summary-label-row">
               <td colSpan={8} />
