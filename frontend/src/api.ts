@@ -230,6 +230,28 @@ export async function renameProject(slug: string, name: string): Promise<Project
   return res.json();
 }
 
+export interface ProjectSettings {
+  total_students_7th?: number;
+  total_students_8th?: number;
+  [key: string]: unknown;
+}
+
+export async function fetchProjectSettings(slug: string): Promise<ProjectSettings> {
+  const res = await fetch(`${base}/projects/${slug}/settings`);
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function saveProjectSettings(slug: string, settings: ProjectSettings): Promise<ProjectSettings> {
+  const res = await fetch(`${base}/projects/${slug}/settings`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(settings),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
 export async function deleteProject(slug: string): Promise<void> {
   const res = await fetch(`${base}/projects/${slug}`, { method: "DELETE" });
   if (!res.ok) throw new Error(await res.text());

@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import ScheduleGrid from "../components/ScheduleGrid";
 import ValidationPanel from "../components/ValidationPanel";
 import DiagnosticsPanel from "../components/DiagnosticsPanel";
-import { fetchSchedule, fetchTable } from "../api";
+import { fetchSchedule, fetchTable, fetchContext, fetchProjectSettings } from "../api";
 import type { Section, DiagnosticGroup } from "../api";
 
 interface Teacher {
@@ -27,6 +27,8 @@ export default function SchedulePage({ activeTab, scheduleVersion, diagnostics, 
   const [fixedKeys, setFixedKeys] = useState<Set<string>>(new Set());
   const [coteachKeys, setCoteachKeys] = useState<Set<string>>(new Set());
   const [courseNames, setCourseNames] = useState<Map<string, string>>(new Map());
+  const [courseEnrollment, setCourseEnrollment] = useState<Map<string, { enrollment_7th: number; enrollment_8th: number }>>(new Map());
+  const [totalStudents, setTotalStudents] = useState<{ grade7: number; grade8: number } | undefined>();
 
   const showingBestAttempt = hasBestAttempt && (diagnostics?.length ?? 0) > 0;
   const hasDiagnostics = diagnostics && diagnostics.length > 0;
@@ -43,8 +45,25 @@ export default function SchedulePage({ activeTab, scheduleVersion, diagnostics, 
     fetchTable("teachers").then(rows => setTeachers(rows as unknown as Teacher[]));
     fetchTable("courses").then(rows => {
       const map = new Map<string, string>();
-      for (const r of rows) if (r.course_id && r.course_title) map.set(String(r.course_id), String(r.course_title));
+      const enr = new Map<string, { enrollment_7th: number; enrollment_8th: number }>();
+      for (const r of rows) {
+        if (r.course_id && r.course_title) map.set(String(r.course_id), String(r.course_title));
+        if (r.course_id) enr.set(String(r.course_id), {
+          enrollment_7th: Number(r.enrollment_7th) || 0,
+          enrollment_8th: Number(r.enrollment_8th) || 0,
+        });
+      }
       setCourseNames(map);
+      setCourseEnrollment(enr);
+    });
+    // Load total students from project settings
+    fetchContext().then(ctx => {
+      if (!ctx.project) return;
+      fetchProjectSettings(ctx.project).then(settings => {
+        if (settings.total_students_7th != null && settings.total_students_8th != null) {
+          setTotalStudents({ grade7: Number(settings.total_students_7th), grade8: Number(settings.total_students_8th) });
+        }
+      });
     });
     fetchTable("fixed_assignments").then(rows => {
       const keys = new Set<string>();
@@ -93,6 +112,8 @@ export default function SchedulePage({ activeTab, scheduleVersion, diagnostics, 
                 fixedKeys={fixedKeys}
                 coteachKeys={coteachKeys}
                 courseNames={courseNames}
+                courseEnrollment={courseEnrollment}
+                totalStudents={totalStudents}
               />
             </>
           )}
