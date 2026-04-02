@@ -286,6 +286,69 @@ def delete_run(run_id: str):
         raise HTTPException(status_code=404, detail=str(e))
 
 
+# ── Grid-lock endpoints ──────────────────────────────────────────────────────
+
+class GridLockRequest(BaseModel):
+    teacher_id: str
+    course_id: str
+    period: int
+
+
+def _fixed_keys_response(db_path, scenario_id):
+    """Return fixedKeys and gridLockedKeys arrays for the frontend."""
+    rows = data_io.read_table(db_path, "fixed_assignments", scenario_id)
+    fixed_keys = [f"{r['teacher_id']}|{r['course_id']}|{r['period']}" for r in rows]
+    grid_locked_keys = [
+        f"{r['teacher_id']}|{r['course_id']}|{r['period']}"
+        for r in rows if r.get("source") == "grid"
+    ]
+    return {"fixedKeys": fixed_keys, "gridLockedKeys": grid_locked_keys}
+
+
+@app.post("/api/grid-lock")
+def toggle_grid_lock(body: GridLockRequest):
+    db_path = _db_path()
+    scenario_id = _scenario_id()
+    rows = data_io.read_table(db_path, "fixed_assignments", scenario_id)
+
+    # Check if this cell is already grid-locked
+    existing_idx = next(
+        (i for i, r in enumerate(rows)
+         if r["teacher_id"] == body.teacher_id
+         and r["course_id"] == body.course_id
+         and int(r["period"]) == body.period
+         and r.get("source") == "grid"),
+        None
+    )
+
+    if existing_idx is not None:
+        # Unlock: remove the grid lock row
+        rows.pop(existing_idx)
+    else:
+        # Lock: add new row with source="grid"
+        rows.append({
+            "teacher_id": body.teacher_id,
+            "course_id": body.course_id,
+            "course_display": "",
+            "period": body.period,
+            "source": "grid",
+        })
+
+    data_io.write_table(db_path, "fixed_assignments", scenario_id, rows)
+    return _fixed_keys_response(db_path, scenario_id)
+
+
+@app.post("/api/grid-lock/clear")
+def clear_grid_locks():
+    db_path = _db_path()
+    scenario_id = _scenario_id()
+    rows = data_io.read_table(db_path, "fixed_assignments", scenario_id)
+    # Keep only non-grid rows
+    rows = [r for r in rows if r.get("source") != "grid"]
+    data_io.write_table(db_path, "fixed_assignments", scenario_id, rows)
+    return _fixed_keys_response(db_path, scenario_id)
+
+
 # ── Schedule endpoint (latest run) ───────────────────────────────────────────
 
 @app.get("/api/schedule")

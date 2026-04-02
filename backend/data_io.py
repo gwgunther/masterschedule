@@ -78,6 +78,7 @@ _SCHEMAS: dict[str, list[tuple[str, str]]] = {
         ("course_id", "TEXT"),
         ("course_display", "TEXT"),
         ("period", "INTEGER"),
+        ("source", "TEXT"),
     ],
     "coteaching_combinations": [
         ("scenario_id", "TEXT"),

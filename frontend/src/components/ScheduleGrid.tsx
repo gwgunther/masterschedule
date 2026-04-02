@@ -13,11 +13,13 @@ interface Props {
   onSelectTeacher: (teacher: Teacher) => void;
   selectedTeacherId?: string;
   fixedKeys?: Set<string>;
+  gridLockedKeys?: Set<string>;
   coteachKeys?: Set<string>;
   courseNames?: Map<string, string>;
   courseEnrollment?: Map<string, { enrollment_7th: number; enrollment_8th: number }>;
   /** Total unique students per grade (not course-enrollment sums) */
   totalStudents?: { grade7: number; grade8: number };
+  onToggleLock?: (teacher_id: string, course_id: string, period: number) => void;
 }
 
 const PERIODS = [1, 2, 3, 4, 5, 6, 7];
@@ -50,7 +52,7 @@ function courseLabel(courseId: string, courseNames?: Map<string, string>): strin
   return title.length > 14 ? title.slice(0, 13) + "…" : title;
 }
 
-export default function ScheduleGrid({ sections, teachers, onSelectTeacher, selectedTeacherId, fixedKeys, coteachKeys, courseNames, courseEnrollment, totalStudents }: Props) {
+export default function ScheduleGrid({ sections, teachers, onSelectTeacher, selectedTeacherId, fixedKeys, gridLockedKeys, coteachKeys, courseNames, totalStudents, onToggleLock }: Props) {
   // lookup: teacher_id → period → Section
   const lookup = new Map<string, Map<number, Section>>();
   for (const s of sections) {
@@ -119,10 +121,18 @@ export default function ScheduleGrid({ sections, teachers, onSelectTeacher, sele
                         return <td key={p} className="period-cell"><span className="pill-empty">—</span></td>;
                       }
                       const isConf = sec.course_id === "CONFERENCE";
-                      const isFixed = fixedKeys?.has(`${sec.teacher_id}|${sec.course_id}|${sec.period}`);
+                      const key = `${sec.teacher_id}|${sec.course_id}|${sec.period}`;
+                      const isDataLocked = fixedKeys?.has(key) && !gridLockedKeys?.has(key);
+                      const isGridLocked = gridLockedKeys?.has(key);
                       const isCoteach = coteachKeys?.has(`${sec.teacher_id}|${sec.course_id}`);
+                      const isLockable = !!onToggleLock && !isDataLocked;
                       return (
-                        <td key={p} className="period-cell">
+                        <td
+                          key={p}
+                          className={`period-cell${isGridLocked ? " grid-locked" : ""}${isLockable ? " lockable" : ""}`}
+                          onClick={isLockable ? (e) => { e.stopPropagation(); onToggleLock(sec.teacher_id, sec.course_id, sec.period); } : undefined}
+                          title={isDataLocked ? "Locked in data table" : isGridLocked ? "Click to unlock" : isLockable ? "Click to lock" : undefined}
+                        >
                           <span className="period-cell-inner">
                             <span className={pillClass(teacher.department, isConf)}>
                               {isConf ? "Conference" : courseLabel(sec.course_id, courseNames)}
@@ -134,9 +144,10 @@ export default function ScheduleGrid({ sections, teachers, onSelectTeacher, sele
                                   : `${sec.total_students}`}
                               </span>
                             )}
-                            {(isFixed || isCoteach) && (
+                            {(isDataLocked || isGridLocked || isCoteach) && (
                               <span className="pill-icons">
-                                {isFixed && <LockIcon />}
+                                {isDataLocked && <LockIcon className="pill-icon-data" />}
+                                {isGridLocked && <LockIcon className="pill-icon-grid" />}
                                 {isCoteach && <CoteachIcon />}
                               </span>
                             )}
@@ -209,9 +220,9 @@ export default function ScheduleGrid({ sections, teachers, onSelectTeacher, sele
   );
 }
 
-function LockIcon() {
+function LockIcon({ className = "pill-icon" }: { className?: string }) {
   return (
-    <svg className="pill-icon" width="9" height="9" viewBox="0 0 24 24" fill="currentColor">
+    <svg className={className} width="9" height="9" viewBox="0 0 24 24" fill="currentColor">
       <path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zM12 3c1.66 0 3 1.34 3 3v2H9V6c0-1.66 1.34-3 3-3zm6 17H6V10h12v10zm-6-3c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2z"/>
     </svg>
   );

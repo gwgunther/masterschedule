@@ -112,6 +112,27 @@ export async function saveTable(table: TableName, rows: Record<string, unknown>[
   if (!res.ok) throw new Error(await res.text());
 }
 
+export interface GridLockResponse {
+  fixedKeys: string[];
+  gridLockedKeys: string[];
+}
+
+export async function toggleGridLock(teacher_id: string, course_id: string, period: number): Promise<GridLockResponse> {
+  const res = await fetch(`${base}/grid-lock`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ teacher_id, course_id, period }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function clearGridLocks(): Promise<GridLockResponse> {
+  const res = await fetch(`${base}/grid-lock/clear`, { method: "POST" });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
 export async function fetchSchedule(): Promise<{ exists: boolean; sections: Section[] }> {
   const res = await fetch(`${base}/schedule`);
   if (!res.ok) throw new Error(await res.text());

@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import ScheduleGrid from "../components/ScheduleGrid";
 import ValidationPanel from "../components/ValidationPanel";
 import DiagnosticsPanel from "../components/DiagnosticsPanel";
-import { fetchSchedule, fetchTable, fetchContext, fetchProjectSettings } from "../api";
+import { fetchSchedule, fetchTable, fetchContext, fetchProjectSettings, toggleGridLock, clearGridLocks } from "../api";
 import type { Section, DiagnosticGroup } from "../api";
 
 interface Teacher {
@@ -25,6 +25,7 @@ export default function SchedulePage({ activeTab, scheduleVersion, diagnostics, 
   const [teachers, setTeachers] = useState<Teacher[]>([]);
   const [scheduleExists, setScheduleExists] = useState(false);
   const [fixedKeys, setFixedKeys] = useState<Set<string>>(new Set());
+  const [gridLockedKeys, setGridLockedKeys] = useState<Set<string>>(new Set());
   const [coteachKeys, setCoteachKeys] = useState<Set<string>>(new Set());
   const [courseNames, setCourseNames] = useState<Map<string, string>>(new Map());
   const [courseEnrollment, setCourseEnrollment] = useState<Map<string, { enrollment_7th: number; enrollment_8th: number }>>(new Map());
@@ -32,6 +33,18 @@ export default function SchedulePage({ activeTab, scheduleVersion, diagnostics, 
 
   const showingBestAttempt = hasBestAttempt && (diagnostics?.length ?? 0) > 0;
   const hasDiagnostics = diagnostics && diagnostics.length > 0;
+
+  const handleToggleLock = async (teacher_id: string, course_id: string, period: number) => {
+    const result = await toggleGridLock(teacher_id, course_id, period);
+    setFixedKeys(new Set(result.fixedKeys));
+    setGridLockedKeys(new Set(result.gridLockedKeys));
+  };
+
+  const handleClearLocks = async () => {
+    const result = await clearGridLocks();
+    setFixedKeys(new Set(result.fixedKeys));
+    setGridLockedKeys(new Set(result.gridLockedKeys));
+  };
 
   const loadSchedule = useCallback(async () => {
     const result = await fetchSchedule();
@@ -66,9 +79,15 @@ export default function SchedulePage({ activeTab, scheduleVersion, diagnostics, 
       });
     });
     fetchTable("fixed_assignments").then(rows => {
-      const keys = new Set<string>();
-      for (const r of rows) keys.add(`${r.teacher_id}|${r.course_id}|${r.period}`);
-      setFixedKeys(keys);
+      const allKeys = new Set<string>();
+      const gridKeys = new Set<string>();
+      for (const r of rows) {
+        const k = `${r.teacher_id}|${r.course_id}|${r.period}`;
+        allKeys.add(k);
+        if (r.source === "grid") gridKeys.add(k);
+      }
+      setFixedKeys(allKeys);
+      setGridLockedKeys(gridKeys);
     });
     fetchTable("coteaching_combinations").then(rows => {
       const keys = new Set<string>();
@@ -104,16 +123,34 @@ export default function SchedulePage({ activeTab, scheduleVersion, diagnostics, 
                   Showing best attempt — this schedule has constraint violations
                 </div>
               )}
+              {gridLockedKeys.size > 0 && (
+                <div style={{
+                  padding: "6px 40px",
+                  background: "#eff6ff",
+                  borderBottom: "1px solid #bfdbfe",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 12,
+                  fontFamily: "'Helvetica Neue', Arial, sans-serif",
+                  fontSize: 12,
+                  color: "#1e40af",
+                }}>
+                  <span>{gridLockedKeys.size} assignment{gridLockedKeys.size !== 1 ? "s" : ""} locked — re-run solver to apply</span>
+                  <button className="unlock-all-btn" onClick={handleClearLocks}>Unlock All</button>
+                </div>
+              )}
               <ScheduleGrid
                 sections={sections}
                 teachers={teachers}
                 onSelectTeacher={() => {}}
                 selectedTeacherId={undefined}
                 fixedKeys={fixedKeys}
+                gridLockedKeys={gridLockedKeys}
                 coteachKeys={coteachKeys}
                 courseNames={courseNames}
                 courseEnrollment={courseEnrollment}
                 totalStudents={totalStudents}
+                onToggleLock={handleToggleLock}
               />
             </>
           )}
