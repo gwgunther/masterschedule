@@ -137,8 +137,8 @@ export default function ScheduleGrid({ sections, teachers, onSelectTeacher, sele
                             </span>
                             {!isConf && sec.total_students != null && sec.total_students > 0 && (
                               <span className="pill-students">
-                                {sec.students_7th && sec.students_8th
-                                  ? `${sec.students_7th} · ${sec.students_8th}`
+                                {sec.students_7th != null && sec.students_8th != null
+                                  ? <><span className="pill-grade-label">7</span>{sec.students_7th}<span className="pill-grade-sep"> · </span><span className="pill-grade-label">8</span>{sec.students_8th}</>
                                   : `${sec.total_students}`}
                               </span>
                             )}
