@@ -194,8 +194,12 @@ def _build_problem(data: dict, elastic: bool = False):
             prob += track_count[tr, p] >= track_min_v[tr], f"track_min_{tr}_{p}"
 
     # 2. Conference: each teacher exactly one CONFERENCE period
+    #    Skip teachers who have no CONFERENCE in their section_locks (e.g. teach all 7 periods)
     if "CONFERENCE" in courses:
+        teachers_with_conf = {t for (t, c) in section_locks if c == "CONFERENCE"}
         for t in teachers:
+            if t not in teachers_with_conf:
+                continue
             if elastic:
                 sp = pulp.LpVariable(f"s_conf_p_{t}", lowBound=0, cat="Integer")
                 sn = pulp.LpVariable(f"s_conf_n_{t}", lowBound=0, cat="Integer")
@@ -208,6 +212,12 @@ def _build_problem(data: dict, elastic: bool = False):
                 prob += (
                     pulp.lpSum(x[t, "CONFERENCE", p] for p in periods) == 1
                 ), f"conf_{t}"
+        # Teachers WITHOUT conference: force zero CONFERENCE periods
+        for t in teachers:
+            if t not in teachers_with_conf:
+                prob += (
+                    pulp.lpSum(x[t, "CONFERENCE", p] for p in periods) == 0
+                ), f"no_conf_{t}"
 
     # 3. One course per teacher per period — always hard (physical)
     for t in teachers:
@@ -217,9 +227,11 @@ def _build_problem(data: dict, elastic: bool = False):
             ), f"one_per_period_{t}_{p}"
 
     # 4. Teacher qualifications — always hard
+    #    CONFERENCE is skipped (all teachers auto-qualified via line above)
+    #    Non-instructional courses (5CS, TITLE1, etc.) DO require qualifications
     for t in teachers:
         for c in courses:
-            if c in non_instr or c == "CONFERENCE":
+            if c == "CONFERENCE":
                 continue
             if c not in qualifications.get(t, set()):
                 prob += (
@@ -416,28 +428,39 @@ def _format_violation(group: str, label: str, slack_val: float, data: dict) -> d
         qual_teachers = [t for t in teachers if c in qualifications.get(t, set())]
         qual_names = [teacher_names.get(t, t) for t in qual_teachers]
 
-        # Compute available capacity: sum of max_sections for qualified teachers
-        # minus their locked sections for OTHER courses
+        # Compute available capacity and locked totals for qualified teachers
         total_capacity = 0
+        total_locked_this = 0
         teacher_details = []
         for t in qual_teachers:
             ms = int(teacher_max.get(t, 0))
-            locked_other = sum(n for (lt, lc), n in section_locks.items() if lt == t and lc != c)
+            # Exclude CONFERENCE from locked_other since max_sections only covers non-conference
+            locked_other = sum(n for (lt, lc), n in section_locks.items() if lt == t and lc != c and lc != "CONFERENCE")
+            locked_this = section_locks.get((t, c), None)
             avail = max(0, ms - locked_other)
             total_capacity += avail
-            t_name = teacher_names.get(t, t)
-            locked_this = section_locks.get((t, c), None)
             if locked_this is not None:
-                teacher_details.append(f"{t_name} (locked: {locked_this})")
+                total_locked_this += locked_this
+            t_name = teacher_names.get(t, t)
+            if locked_this is not None:
+                total_locked = sum(n for (lt, lc), n in section_locks.items() if lt == t and lc != "CONFERENCE")
+                teacher_details.append(f"{t_name} (locked: {locked_this} for this, {total_locked}/{ms} non-conf)")
             else:
-                teacher_details.append(f"{t_name} (up to {avail})")
+                teacher_details.append(f"{t_name} (up to {avail} free)")
 
         if not qual_teachers:
             detail["message"] = f"{name} — needs {needed} sections but no qualified teachers exist"
             detail["context"] = "Add teacher qualifications for this course"
         else:
             detail["message"] = f"{name} — needs {needed} sections, short by {shortfall}"
-            detail["context"] = f"Qualified: {', '.join(teacher_details)} — total capacity ~{total_capacity}"
+            if total_locked_this >= needed and total_capacity < total_locked_this:
+                detail["context"] = (
+                    f"Locked sections sum to {total_locked_this} (enough), but teachers are over-committed "
+                    f"(only ~{total_capacity} periods available across all their courses). "
+                    f"Qualified: {', '.join(teacher_details)}"
+                )
+            else:
+                detail["context"] = f"Qualified: {', '.join(teacher_details)} — available capacity ~{total_capacity}"
 
     elif group == "exact_sections":
         t = label

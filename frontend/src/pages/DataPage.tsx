@@ -61,11 +61,11 @@ const TABLES: TableDef[] = [
   {
     name: "fixed_assignments",
     label: "Fixed Assignments",
-    columns: ["teacher_id", "course_id", "course_display", "period"],
+    columns: ["teacher_id", "course_id", "period"],
     teacherCols: ["teacher_id"],
     courseCols: ["course_id"],
     fixedOptions: { period: PERIOD_OPTIONS },
-    columnLabels: { teacher_id: "Teacher", course_id: "Course", course_display: "Display Name" },
+    columnLabels: { teacher_id: "Teacher", course_id: "Course" },
   },
   {
     name: "coteaching_combinations",
