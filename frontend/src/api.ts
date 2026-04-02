@@ -8,7 +8,8 @@ export type TableName =
   | "fixed_assignments"
   | "coteaching_combinations"
   | "semester_pairs"
-  | "departments";
+  | "departments"
+  | "course_conflicts";
 
 export interface Section {
   section_id: string;

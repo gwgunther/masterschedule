@@ -91,6 +91,15 @@ const TABLES: TableDef[] = [
     courseCols: ["course_a", "course_b"],
     columnLabels: { course_a: "Course A", teacher_a: "Teacher A", course_b: "Course B", teacher_b: "Teacher B" },
   },
+  {
+    name: "course_conflicts",
+    label: "Course Conflicts",
+    columns: ["group_name", "course_id", "constraint_type", "notes"],
+    courseCols: ["course_id"],
+    fixedOptions: { constraint_type: [{ value: "hard", label: "Hard" }, { value: "soft", label: "Soft" }] },
+    groupByColumn: "group_name",
+    columnLabels: { group_name: "Group", course_id: "Course", constraint_type: "Type" },
+  },
 ];
 
 interface Props {

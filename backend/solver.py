@@ -27,6 +27,7 @@ CONSTRAINT_GROUPS = {
     "forced":         ("Fixed Assignments",           "Fixed Assignments"),
     "coteach":        ("Co-Teaching",                "Co-Teaching"),
     "semester_pairs": ("Semester Pairs",             "Semester Pairs"),
+    "conflict_hard":  ("Course Conflicts (hard)",    "Course Conflicts"),
 }
 
 
@@ -39,6 +40,7 @@ def _load_data(data_dir: Path) -> dict:
     df_constraints = pd.read_csv(data_dir / "fixed_assignments.csv")
     df_coteach = pd.read_csv(data_dir / "coteaching_combinations.csv")
     df_pairs = pd.read_csv(data_dir / "semester_pairs.csv")
+    df_conflicts = pd.read_csv(data_dir / "course_conflicts.csv")
 
     for col in ("enrollment_7th", "enrollment_8th", "total_enrollment", "num_sections"):
         df_courses[col] = pd.to_numeric(df_courses[col], errors="coerce").fillna(0).astype(int)
@@ -85,6 +87,19 @@ def _load_data(data_dir: Path) -> dict:
         pairs.append((str(row["course_a"]), str(row["teacher_a"]),
                       str(row["course_b"]), str(row["teacher_b"])))
 
+    # Course conflict groups from course_conflicts table
+    conflict_groups_hard: dict[str, list[str]] = {}
+    conflict_groups_soft: dict[str, list[str]] = {}
+    course_set = set(courses)
+    for _, row in df_conflicts.iterrows():
+        grp = str(row["group_name"])
+        cid = str(row["course_id"])
+        ctype = str(row.get("constraint_type", "hard")).lower()
+        if cid not in course_set:
+            continue
+        target = conflict_groups_hard if ctype == "hard" else conflict_groups_soft
+        target.setdefault(grp, []).append(cid)
+
     track_courses = {
         "honors_7": [c for c in courses if c.startswith("EN701") or c.startswith("MA701") or c.startswith("SC701") or c.startswith("SS701")],
         "honors_8": [c for c in courses if c.startswith("EN801") or c.startswith("MA801") or c.startswith("SC801") or c.startswith("SS801")],
@@ -109,6 +124,8 @@ def _load_data(data_dir: Path) -> dict:
         "coteach_list": coteach_list, "pairs": pairs,
         "track_courses": track_courses, "course_names": course_names,
         "teacher_names": teacher_names,
+        "conflict_groups_hard": conflict_groups_hard,
+        "conflict_groups_soft": conflict_groups_soft,
     }
 
 
@@ -130,6 +147,8 @@ def _build_problem(data: dict, elastic: bool = False):
     coteach_list = data["coteach_list"]
     pairs = data["pairs"]
     track_courses = data["track_courses"]
+    conflict_groups_hard = data["conflict_groups_hard"]
+    conflict_groups_soft = data["conflict_groups_soft"]
 
     prob = pulp.LpProblem("MasterSchedule", pulp.LpMinimize)
     x = pulp.LpVariable.dicts(
@@ -166,8 +185,19 @@ def _build_problem(data: dict, elastic: bool = False):
     track_max_v = pulp.LpVariable.dicts("track_max", tracks, lowBound=0, cat="Integer")
     track_min_v = pulp.LpVariable.dicts("track_min", tracks, lowBound=0, cat="Integer")
 
+    # Soft conflict group spread variables (same pattern as track distribution)
+    soft_groups = list(conflict_groups_soft.keys())
+    soft_count = pulp.LpVariable.dicts(
+        "soft_conf_count",
+        ((g, p) for g in soft_groups for p in periods),
+        lowBound=0, cat="Integer",
+    )
+    soft_max_v = pulp.LpVariable.dicts("soft_conf_max", soft_groups, lowBound=0, cat="Integer")
+    soft_min_v = pulp.LpVariable.dicts("soft_conf_min", soft_groups, lowBound=0, cat="Integer")
+
     class_size_obj = pulp.lpSum(pos_dev[c] + neg_dev[c] for c in courses)
     distribution_obj = pulp.lpSum(track_max_v[tr] - track_min_v[tr] for tr in tracks)
+    conflict_spread_obj = pulp.lpSum(soft_max_v[g] - soft_min_v[g] for g in soft_groups) if soft_groups else 0
     slack_penalty = pulp.LpAffineExpression()  # filled if elastic
 
     # ── Constraints ───────────────────────────────────────────────────
@@ -362,8 +392,35 @@ def _build_problem(data: dict, elastic: bool = False):
                     x[ta, ca, p] == x[tb, cb, p]
                 ), f"pair_{ca}_{ta}_{cb}_{tb}_{p}"
 
+    # 11. Course conflict groups — hard (at most 1 section from group per period)
+    for grp, clist in conflict_groups_hard.items():
+        for p in periods:
+            if elastic:
+                s = pulp.LpVariable(f"s_conflict_h_{grp}_{p}", lowBound=0, cat="Integer")
+                prob += (
+                    pulp.lpSum(x[t, c, p] for t in teachers for c in clist) + s <= 1
+                ), f"conflict_hard_{grp}_{p}"
+                slacks["conflict_hard"][f"{grp}|P{p}"] = [s]
+                slack_penalty += PENALTY * s
+            else:
+                prob += (
+                    pulp.lpSum(x[t, c, p] for t in teachers for c in clist) <= 1
+                ), f"conflict_hard_{grp}_{p}"
+
+    # 12. Course conflict groups — soft (spread sections across periods)
+    for g in soft_groups:
+        clist = conflict_groups_soft[g]
+        for p in periods:
+            prob += (
+                soft_count[g, p] ==
+                pulp.lpSum(x[t, c, p] for t in teachers for c in clist)
+            ), f"soft_conf_count_{g}_{p}"
+        for p in periods:
+            prob += soft_count[g, p] <= soft_max_v[g], f"soft_conf_max_{g}_{p}"
+            prob += soft_count[g, p] >= soft_min_v[g], f"soft_conf_min_{g}_{p}"
+
     # Set objective
-    prob += class_size_obj + 1000 * distribution_obj + slack_penalty
+    prob += class_size_obj + 1000 * distribution_obj + 1000 * conflict_spread_obj + slack_penalty
 
     return prob, x, slacks
 
@@ -539,6 +596,14 @@ def _format_violation(group: str, label: str, slack_val: float, data: dict) -> d
         cb_name = course_names.get(cb, cb)
         detail["message"] = f"{ta_name}/{ca_name} and {tb_name}/{cb_name} must share {parts[4]} — cannot sync"
         detail["context"] = "Semester-paired courses must be taught same period by their respective teachers"
+
+    elif group == "conflict_hard":
+        parts = label.split("|")
+        grp, period = parts[0], parts[1]
+        conflict_courses = data.get("conflict_groups_hard", {}).get(grp, [])
+        course_list = ", ".join(course_names.get(c, c) for c in conflict_courses)
+        detail["message"] = f"Conflict group \"{grp}\" — more than 1 section in {period}"
+        detail["context"] = f"Courses in group: {course_list}"
 
     else:
         detail["message"] = f"{label}: slack={slack_val}"
