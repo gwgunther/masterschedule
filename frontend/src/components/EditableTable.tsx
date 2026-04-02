@@ -327,6 +327,12 @@ export default function EditableTable({
                     if (!search.trim()) return true;
                     const q = search.toLowerCase();
                     return Object.values(row).some(v => String(v ?? "").toLowerCase().includes(q));
+                  })
+                  .sort((a, b) => {
+                    if (!groupByColumn) return 0;
+                    const ga = String(a.row[groupByColumn] ?? "").toLowerCase();
+                    const gb = String(b.row[groupByColumn] ?? "").toLowerCase();
+                    return ga < gb ? -1 : ga > gb ? 1 : 0;
                   });
                 let lastGroupVal: string | null = null;
                 return filtered.map(({ row, rIdx }, displayIdx) => {
