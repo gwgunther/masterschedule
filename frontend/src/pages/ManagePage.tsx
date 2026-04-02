@@ -9,6 +9,8 @@ import {
   deleteProject,
   deleteScenario,
   setContext,
+  fetchProjectSettings,
+  saveProjectSettings,
   type Project,
   type Scenario,
   type ActiveContext,
@@ -33,6 +35,11 @@ export default function ManagePage({ context, onContextChange }: Props) {
   const [cloneFrom, setCloneFrom] = useState<string>("");
   const [showNewScenario, setShowNewScenario] = useState(false);
 
+  // Project settings
+  const [settings7th, setSettings7th] = useState("");
+  const [settings8th, setSettings8th] = useState("");
+  const [settingsSaved, setSettingsSaved] = useState(false);
+
   // Inline rename state
   const [renamingProject, setRenamingProject] = useState<string | null>(null);
   const [renameProjectValue, setRenameProjectValue] = useState("");
@@ -50,8 +57,14 @@ export default function ManagePage({ context, onContextChange }: Props) {
   useEffect(() => {
     if (selectedProject) {
       fetchScenarios(selectedProject).then(setScenarios);
+      fetchProjectSettings(selectedProject).then(s => {
+        setSettings7th(s.total_students_7th != null ? String(s.total_students_7th) : "");
+        setSettings8th(s.total_students_8th != null ? String(s.total_students_8th) : "");
+      });
     } else {
       setScenarios([]);
+      setSettings7th("");
+      setSettings8th("");
     }
   }, [selectedProject]);
 
@@ -176,6 +189,16 @@ export default function ManagePage({ context, onContextChange }: Props) {
     } catch (err) {
       alert(err instanceof Error ? err.message : "Cannot delete");
     }
+  };
+
+  const handleSaveSettings = async () => {
+    if (!selectedProject) return;
+    await saveProjectSettings(selectedProject, {
+      total_students_7th: settings7th ? Number(settings7th) : undefined,
+      total_students_8th: settings8th ? Number(settings8th) : undefined,
+    });
+    setSettingsSaved(true);
+    setTimeout(() => setSettingsSaved(false), 2000);
   };
 
   const handleActivate = async (projectSlug: string, scenarioSlug: string) => {
@@ -374,6 +397,42 @@ export default function ManagePage({ context, onContextChange }: Props) {
           })}
         </div>
       </div>
+
+      {/* ── Project Settings ───────────────────────────────────── */}
+      {selectedProject && (
+        <div style={{ borderTop: "1px solid #e0ddd5", padding: "20px 32px" }}>
+          <div style={{ fontFamily: "'Helvetica Neue', Arial, sans-serif", fontSize: 10, letterSpacing: "0.12em", textTransform: "uppercase", color: "#888", fontWeight: 600, marginBottom: 14 }}>
+            Project Settings
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 24, flexWrap: "wrap" }}>
+            <label style={{ display: "flex", alignItems: "center", gap: 8, fontFamily: "'Helvetica Neue', Arial, sans-serif", fontSize: 12, color: "#555" }}>
+              7th grade students
+              <input
+                type="number"
+                className="selector-input"
+                value={settings7th}
+                onChange={e => setSettings7th(e.target.value)}
+                style={{ width: 80, textAlign: "right" }}
+                placeholder="—"
+              />
+            </label>
+            <label style={{ display: "flex", alignItems: "center", gap: 8, fontFamily: "'Helvetica Neue', Arial, sans-serif", fontSize: 12, color: "#555" }}>
+              8th grade students
+              <input
+                type="number"
+                className="selector-input"
+                value={settings8th}
+                onChange={e => setSettings8th(e.target.value)}
+                style={{ width: 80, textAlign: "right" }}
+                placeholder="—"
+              />
+            </label>
+            <button className="btn-small" onClick={handleSaveSettings}>
+              {settingsSaved ? "Saved" : "Save"}
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
