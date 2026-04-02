@@ -188,7 +188,7 @@ export default function ManagePage({ context, onContextChange }: Props) {
   return (
     <div style={{ display: "flex", height: "100%", overflow: "hidden" }}>
       {/* ── Left: Projects ─────────────────────────────────────── */}
-      <div style={{ width: 280, borderRight: "1px solid #e0ddd5", display: "flex", flexDirection: "column" }}>
+      <div style={{ width: 360, minWidth: 260, borderRight: "1px solid #e0ddd5", display: "flex", flexDirection: "column" }}>
         <div style={{ padding: "24px 24px 12px", borderBottom: "1px solid #e0ddd5", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <span style={{ fontFamily: "'Helvetica Neue', Arial, sans-serif", fontSize: 10, letterSpacing: "0.12em", textTransform: "uppercase", color: "#888", fontWeight: 600 }}>
             Projects
@@ -234,7 +234,7 @@ export default function ManagePage({ context, onContextChange }: Props) {
                   />
                 ) : (
                   <>
-                    <div style={{ fontWeight: p.slug === context.project ? 600 : 400, fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    <div style={{ fontWeight: p.slug === context.project ? 600 : 400, fontSize: 13, wordBreak: "break-word" }}>
                       {p.name}
                       {p.slug === context.project && <span className="manage-active-badge">active</span>}
                     </div>

@@ -13,8 +13,9 @@ import pulp
 
 # Non-instructional course IDs — consume teacher time, no student enrollment
 NON_INSTRUCTIONAL = {
-    "CONFERENCE", "PROGRESSMON", "TITLE1", "COMSCHOOLS",
-    "5CS", "ASBRELEASE", "REWARDS",
+    "CONFERENCE", "PROGRESS", "PROGRESSMON", "TITLE1",
+    "COMMUNITY", "COMSCHOOLS", "5CS", "ASB", "ASBRELEASE",
+    "REWARDS", "DLI",
 }
 
 # Constraint group labels + source data table for diagnostics
@@ -72,10 +73,10 @@ def _load_data(data_dir: Path) -> dict:
     coteach_list = []
     for _, row in df_coteach.iterrows():
         coteach_list.append({
-            "sped_teacher": str(row["sped_teacher"]),
-            "coteach_id": str(row["coteach_id"]),
+            "swd_teacher": str(row["swd_teacher"]),
+            "swd_course_code": str(row["swd_course_code"]),
             "gened_teacher": str(row["gened_teacher"]),
-            "gened_course": str(row["gened_course"]),
+            "gened_course_code": str(row["gened_course_code"]),
             "num_sections": int(row["num_sections"]),
         })
 
@@ -295,10 +296,10 @@ def _build_problem(data: dict, elastic: bool = False):
 
     # 9. Co-teaching synchronization + section counts
     for info in coteach_list:
-        co_t = info["sped_teacher"]
-        co_c = info["coteach_id"]
+        co_t = info["swd_teacher"]
+        co_c = info["swd_course_code"]
         pri_t = info["gened_teacher"]
-        pri_c = info["gened_course"]
+        pri_c = info["gened_course_code"]
         n = info["num_sections"]
         if not all(e in teachers for e in (co_t, pri_t)):
             continue
@@ -607,7 +608,8 @@ def run_solver(data_dir: Path | None = None, progress_cb=None,
                 if best_sections:
                     out_path = run_dir / "sections.csv"
                     df_out = pd.DataFrame(best_sections)
-                    df_out[["section_id", "course_id", "teacher_id", "period"]].to_csv(out_path, index=False)
+                    df_out[["section_id", "course_id", "teacher_id", "period",
+                            "total_students", "students_7th", "students_8th"]].to_csv(out_path, index=False)
 
             total_violations = sum(d["violation_count"] for d in diagnostics)
             total_time = round(time.time() - start, 1)
@@ -661,7 +663,8 @@ def run_solver(data_dir: Path | None = None, progress_cb=None,
         # Write output CSV to the run directory
         out_path = run_dir / "sections.csv"
         df_out = pd.DataFrame(sections)
-        df_out[["section_id", "course_id", "teacher_id", "period"]].to_csv(out_path, index=False)
+        df_out[["section_id", "course_id", "teacher_id", "period",
+                "total_students", "students_7th", "students_8th"]].to_csv(out_path, index=False)
 
         solve_time = round(time.time() - start, 1)
         _progress("done", f"Solved — {len(sections)} sections assigned")

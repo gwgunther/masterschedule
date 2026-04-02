@@ -44,7 +44,6 @@ function courseLabel(courseId: string, courseNames?: Map<string, string>): strin
   if (!courseNames) return courseId;
   const title = courseNames.get(courseId);
   if (!title) return courseId;
-  // Truncate long titles
   return title.length > 14 ? title.slice(0, 13) + "…" : title;
 }
 
@@ -109,6 +108,13 @@ export default function ScheduleGrid({ sections, teachers, onSelectTeacher, sele
                             <span className={pillClass(teacher.department, isConf)}>
                               {isConf ? "Conference" : courseLabel(sec.course_id, courseNames)}
                             </span>
+                            {!isConf && sec.total_students != null && sec.total_students > 0 && (
+                              <span className="pill-students">
+                                {sec.students_7th && sec.students_8th
+                                  ? `${sec.students_7th} · ${sec.students_8th}`
+                                  : `${sec.total_students}`}
+                              </span>
+                            )}
                             {(isFixed || isCoteach) && (
                               <span className="pill-icons">
                                 {isFixed && <LockIcon />}
