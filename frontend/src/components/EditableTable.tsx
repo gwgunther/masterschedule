@@ -26,6 +26,8 @@ interface Props {
   narrowColumns?: string[];
   /** Override display labels for column headers */
   columnLabels?: Record<string, string>;
+  /** Column to visually group rows by (adds separator between groups) */
+  groupByColumn?: string;
   /** Export callback for CSV download */
   onExport?: () => void;
 }
@@ -39,7 +41,7 @@ function getNum(row: Record<string, unknown>, col: string): number {
 export default function EditableTable({
   table, columns, columnRefs = {}, computedColumns = [],
   searchable = false, refColumns = [], narrowColumns = [],
-  columnLabels = {}, onExport,
+  columnLabels = {}, groupByColumn, onExport,
 }: Props) {
   const [rows, setRows] = useState<Record<string, unknown>[]>([]);
   const [loading, setLoading] = useState(false);
@@ -318,34 +320,52 @@ export default function EditableTable({
               </tr>
             </thead>
             <tbody>
-              {rows
-                .map((row, rIdx) => ({ row, rIdx }))
-                .filter(({ row }) => {
-                  if (!search.trim()) return true;
-                  const q = search.toLowerCase();
-                  return Object.values(row).some(v => String(v ?? "").toLowerCase().includes(q));
-                })
-                .map(({ row, rIdx }) => (
-                <tr key={rIdx}>
-                  {columns.map(col => (
-                    <td key={col} style={tdStyle(col)}>
-                      {renderCell(row, rIdx, col)}
-                    </td>
-                  ))}
-                  <td style={{ width: 40, padding: "0 4px", position: "relative" }}>
-                    {confirmDelete === rIdx ? (
-                      <div className="delete-confirm">
-                        <button className="delete-confirm-yes" onClick={() => deleteRow(rIdx)}>Delete</button>
-                        <button className="delete-confirm-no" onClick={() => setConfirmDelete(null)}>Cancel</button>
-                      </div>
-                    ) : (
-                      <button className="row-action-btn" onClick={() => setConfirmDelete(rIdx)} title="Row actions">
-                        ⋯
-                      </button>
-                    )}
-                  </td>
-                </tr>
-              ))}
+              {(() => {
+                const filtered = rows
+                  .map((row, rIdx) => ({ row, rIdx }))
+                  .filter(({ row }) => {
+                    if (!search.trim()) return true;
+                    const q = search.toLowerCase();
+                    return Object.values(row).some(v => String(v ?? "").toLowerCase().includes(q));
+                  });
+                let lastGroupVal: string | null = null;
+                return filtered.map(({ row, rIdx }, displayIdx) => {
+                  const elements: React.ReactNode[] = [];
+                  if (groupByColumn) {
+                    const groupVal = String(row[groupByColumn] ?? "");
+                    if (displayIdx > 0 && groupVal !== lastGroupVal) {
+                      elements.push(
+                        <tr key={`sep-${rIdx}`} className="group-separator">
+                          <td colSpan={columns.length + 1} />
+                        </tr>
+                      );
+                    }
+                    lastGroupVal = groupVal;
+                  }
+                  elements.push(
+                    <tr key={rIdx}>
+                      {columns.map(col => (
+                        <td key={col} style={tdStyle(col)}>
+                          {renderCell(row, rIdx, col)}
+                        </td>
+                      ))}
+                      <td style={{ width: 40, padding: "0 4px", position: "relative" }}>
+                        {confirmDelete === rIdx ? (
+                          <div className="delete-confirm">
+                            <button className="delete-confirm-yes" onClick={() => deleteRow(rIdx)}>Delete</button>
+                            <button className="delete-confirm-no" onClick={() => setConfirmDelete(null)}>Cancel</button>
+                          </div>
+                        ) : (
+                          <button className="row-action-btn" onClick={() => setConfirmDelete(rIdx)} title="Row actions">
+                            ⋯
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                  return elements;
+                });
+              })()}
               {rows.length === 0 && (
                 <tr>
                   <td colSpan={columns.length + 1} style={{ textAlign: "center", padding: "32px 14px", fontStyle: "italic", color: "#aaa", fontSize: 13 }}>

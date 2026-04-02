@@ -14,8 +14,9 @@ import pulp
 
 # Non-instructional course IDs — consume teacher time, no student enrollment
 NON_INSTRUCTIONAL = {
-    "CONFERENCE", "PROGRESSMON", "TITLE1", "COMSCHOOLS",
-    "5CS", "ASBRELEASE", "REWARDS",
+    "CONFERENCE", "PROGRESS", "PROGRESSMON", "TITLE1",
+    "COMMUNITY", "COMSCHOOLS", "5CS", "ASB", "ASBRELEASE",
+    "REWARDS", "DLI",
 }
 
 # Constraint group labels + source data table for diagnostics
@@ -27,6 +28,7 @@ CONSTRAINT_GROUPS = {
     "forced":         ("Fixed Assignments",           "Fixed Assignments"),
     "coteach":        ("Co-Teaching",                "Co-Teaching"),
     "semester_pairs": ("Semester Pairs",             "Semester Pairs"),
+    "conflict_hard":  ("Course Conflicts (hard)",    "Course Conflicts"),
 }
 
 
@@ -39,6 +41,7 @@ def _load_data(data_dir: Path) -> dict:
     df_constraints = pd.read_csv(data_dir / "fixed_assignments.csv")
     df_coteach = pd.read_csv(data_dir / "coteaching_combinations.csv")
     df_pairs = pd.read_csv(data_dir / "semester_pairs.csv")
+    df_conflicts = pd.read_csv(data_dir / "course_conflicts.csv")
 
     for col in ("enrollment_7th", "enrollment_8th", "total_enrollment", "num_sections"):
         df_courses[col] = pd.to_numeric(df_courses[col], errors="coerce").fillna(0).astype(int)
@@ -73,10 +76,10 @@ def _load_data(data_dir: Path) -> dict:
     coteach_list = []
     for _, row in df_coteach.iterrows():
         coteach_list.append({
-            "sped_teacher": str(row["sped_teacher"]),
-            "coteach_id": str(row["coteach_id"]),
+            "swd_teacher": str(row["swd_teacher"]),
+            "swd_course_code": str(row["swd_course_code"]),
             "gened_teacher": str(row["gened_teacher"]),
-            "gened_course": str(row["gened_course"]),
+            "gened_course_code": str(row["gened_course_code"]),
             "num_sections": int(row["num_sections"]),
         })
 
@@ -84,6 +87,19 @@ def _load_data(data_dir: Path) -> dict:
     for _, row in df_pairs.iterrows():
         pairs.append((str(row["course_a"]), str(row["teacher_a"]),
                       str(row["course_b"]), str(row["teacher_b"])))
+
+    # Course conflict groups from course_conflicts table
+    conflict_groups_hard: dict[str, list[str]] = {}
+    conflict_groups_soft: dict[str, list[str]] = {}
+    course_set = set(courses)
+    for _, row in df_conflicts.iterrows():
+        grp = str(row["group_name"])
+        cid = str(row["course_id"])
+        ctype = str(row.get("constraint_type", "hard")).lower()
+        if cid not in course_set:
+            continue
+        target = conflict_groups_hard if ctype == "hard" else conflict_groups_soft
+        target.setdefault(grp, []).append(cid)
 
     track_courses = {
         "honors_7": [c for c in courses if c.startswith("EN701") or c.startswith("MA701") or c.startswith("SC701") or c.startswith("SS701")],
@@ -109,6 +125,8 @@ def _load_data(data_dir: Path) -> dict:
         "coteach_list": coteach_list, "pairs": pairs,
         "track_courses": track_courses, "course_names": course_names,
         "teacher_names": teacher_names,
+        "conflict_groups_hard": conflict_groups_hard,
+        "conflict_groups_soft": conflict_groups_soft,
     }
 
 
@@ -130,6 +148,8 @@ def _build_problem(data: dict, elastic: bool = False):
     coteach_list = data["coteach_list"]
     pairs = data["pairs"]
     track_courses = data["track_courses"]
+    conflict_groups_hard = data["conflict_groups_hard"]
+    conflict_groups_soft = data["conflict_groups_soft"]
 
     prob = pulp.LpProblem("MasterSchedule", pulp.LpMinimize)
     x = pulp.LpVariable.dicts(
@@ -166,8 +186,19 @@ def _build_problem(data: dict, elastic: bool = False):
     track_max_v = pulp.LpVariable.dicts("track_max", tracks, lowBound=0, cat="Integer")
     track_min_v = pulp.LpVariable.dicts("track_min", tracks, lowBound=0, cat="Integer")
 
+    # Soft conflict group spread variables (same pattern as track distribution)
+    soft_groups = list(conflict_groups_soft.keys())
+    soft_count = pulp.LpVariable.dicts(
+        "soft_conf_count",
+        ((g, p) for g in soft_groups for p in periods),
+        lowBound=0, cat="Integer",
+    )
+    soft_max_v = pulp.LpVariable.dicts("soft_conf_max", soft_groups, lowBound=0, cat="Integer")
+    soft_min_v = pulp.LpVariable.dicts("soft_conf_min", soft_groups, lowBound=0, cat="Integer")
+
     class_size_obj = pulp.lpSum(pos_dev[c] + neg_dev[c] for c in courses)
     distribution_obj = pulp.lpSum(track_max_v[tr] - track_min_v[tr] for tr in tracks)
+    conflict_spread_obj = pulp.lpSum(soft_max_v[g] - soft_min_v[g] for g in soft_groups) if soft_groups else 0
     slack_penalty = pulp.LpAffineExpression()  # filled if elastic
 
     # ── Constraints ───────────────────────────────────────────────────
@@ -194,8 +225,12 @@ def _build_problem(data: dict, elastic: bool = False):
             prob += track_count[tr, p] >= track_min_v[tr], f"track_min_{tr}_{p}"
 
     # 2. Conference: each teacher exactly one CONFERENCE period
+    #    Skip teachers who have no CONFERENCE in their section_locks (e.g. teach all 7 periods)
     if "CONFERENCE" in courses:
+        teachers_with_conf = {t for (t, c) in section_locks if c == "CONFERENCE"}
         for t in teachers:
+            if t not in teachers_with_conf:
+                continue
             if elastic:
                 sp = pulp.LpVariable(f"s_conf_p_{t}", lowBound=0, cat="Integer")
                 sn = pulp.LpVariable(f"s_conf_n_{t}", lowBound=0, cat="Integer")
@@ -208,6 +243,12 @@ def _build_problem(data: dict, elastic: bool = False):
                 prob += (
                     pulp.lpSum(x[t, "CONFERENCE", p] for p in periods) == 1
                 ), f"conf_{t}"
+        # Teachers WITHOUT conference: force zero CONFERENCE periods
+        for t in teachers:
+            if t not in teachers_with_conf:
+                prob += (
+                    pulp.lpSum(x[t, "CONFERENCE", p] for p in periods) == 0
+                ), f"no_conf_{t}"
 
     # 3. One course per teacher per period — always hard (physical)
     for t in teachers:
@@ -217,9 +258,11 @@ def _build_problem(data: dict, elastic: bool = False):
             ), f"one_per_period_{t}_{p}"
 
     # 4. Teacher qualifications — always hard
+    #    CONFERENCE is skipped (all teachers auto-qualified via line above)
+    #    Non-instructional courses (5CS, TITLE1, etc.) DO require qualifications
     for t in teachers:
         for c in courses:
-            if c in non_instr or c == "CONFERENCE":
+            if c == "CONFERENCE":
                 continue
             if c not in qualifications.get(t, set()):
                 prob += (
@@ -296,10 +339,10 @@ def _build_problem(data: dict, elastic: bool = False):
 
     # 9. Co-teaching synchronization + section counts
     for info in coteach_list:
-        co_t = info["sped_teacher"]
-        co_c = info["coteach_id"]
+        co_t = info["swd_teacher"]
+        co_c = info["swd_course_code"]
         pri_t = info["gened_teacher"]
-        pri_c = info["gened_course"]
+        pri_c = info["gened_course_code"]
         n = info["num_sections"]
         if not all(e in teachers for e in (co_t, pri_t)):
             continue
@@ -350,8 +393,35 @@ def _build_problem(data: dict, elastic: bool = False):
                     x[ta, ca, p] == x[tb, cb, p]
                 ), f"pair_{ca}_{ta}_{cb}_{tb}_{p}"
 
+    # 11. Course conflict groups — hard (at most 1 section from group per period)
+    for grp, clist in conflict_groups_hard.items():
+        for p in periods:
+            if elastic:
+                s = pulp.LpVariable(f"s_conflict_h_{grp}_{p}", lowBound=0, cat="Integer")
+                prob += (
+                    pulp.lpSum(x[t, c, p] for t in teachers for c in clist) + s <= 1
+                ), f"conflict_hard_{grp}_{p}"
+                slacks["conflict_hard"][f"{grp}|P{p}"] = [s]
+                slack_penalty += PENALTY * s
+            else:
+                prob += (
+                    pulp.lpSum(x[t, c, p] for t in teachers for c in clist) <= 1
+                ), f"conflict_hard_{grp}_{p}"
+
+    # 12. Course conflict groups — soft (spread sections across periods)
+    for g in soft_groups:
+        clist = conflict_groups_soft[g]
+        for p in periods:
+            prob += (
+                soft_count[g, p] ==
+                pulp.lpSum(x[t, c, p] for t in teachers for c in clist)
+            ), f"soft_conf_count_{g}_{p}"
+        for p in periods:
+            prob += soft_count[g, p] <= soft_max_v[g], f"soft_conf_max_{g}_{p}"
+            prob += soft_count[g, p] >= soft_min_v[g], f"soft_conf_min_{g}_{p}"
+
     # Set objective
-    prob += class_size_obj + 1000 * distribution_obj + slack_penalty
+    prob += class_size_obj + 1000 * distribution_obj + 1000 * conflict_spread_obj + slack_penalty
 
     return prob, x, slacks
 
@@ -416,28 +486,39 @@ def _format_violation(group: str, label: str, slack_val: float, data: dict) -> d
         qual_teachers = [t for t in teachers if c in qualifications.get(t, set())]
         qual_names = [teacher_names.get(t, t) for t in qual_teachers]
 
-        # Compute available capacity: sum of max_sections for qualified teachers
-        # minus their locked sections for OTHER courses
+        # Compute available capacity and locked totals for qualified teachers
         total_capacity = 0
+        total_locked_this = 0
         teacher_details = []
         for t in qual_teachers:
             ms = int(teacher_max.get(t, 0))
-            locked_other = sum(n for (lt, lc), n in section_locks.items() if lt == t and lc != c)
+            # Exclude CONFERENCE from locked_other since max_sections only covers non-conference
+            locked_other = sum(n for (lt, lc), n in section_locks.items() if lt == t and lc != c and lc != "CONFERENCE")
+            locked_this = section_locks.get((t, c), None)
             avail = max(0, ms - locked_other)
             total_capacity += avail
-            t_name = teacher_names.get(t, t)
-            locked_this = section_locks.get((t, c), None)
             if locked_this is not None:
-                teacher_details.append(f"{t_name} (locked: {locked_this})")
+                total_locked_this += locked_this
+            t_name = teacher_names.get(t, t)
+            if locked_this is not None:
+                total_locked = sum(n for (lt, lc), n in section_locks.items() if lt == t and lc != "CONFERENCE")
+                teacher_details.append(f"{t_name} (locked: {locked_this} for this, {total_locked}/{ms} non-conf)")
             else:
-                teacher_details.append(f"{t_name} (up to {avail})")
+                teacher_details.append(f"{t_name} (up to {avail} free)")
 
         if not qual_teachers:
             detail["message"] = f"{name} — needs {needed} sections but no qualified teachers exist"
             detail["context"] = "Add teacher qualifications for this course"
         else:
             detail["message"] = f"{name} — needs {needed} sections, short by {shortfall}"
-            detail["context"] = f"Qualified: {', '.join(teacher_details)} — total capacity ~{total_capacity}"
+            if total_locked_this >= needed and total_capacity < total_locked_this:
+                detail["context"] = (
+                    f"Locked sections sum to {total_locked_this} (enough), but teachers are over-committed "
+                    f"(only ~{total_capacity} periods available across all their courses). "
+                    f"Qualified: {', '.join(teacher_details)}"
+                )
+            else:
+                detail["context"] = f"Qualified: {', '.join(teacher_details)} — available capacity ~{total_capacity}"
 
     elif group == "exact_sections":
         t = label
@@ -516,6 +597,14 @@ def _format_violation(group: str, label: str, slack_val: float, data: dict) -> d
         cb_name = course_names.get(cb, cb)
         detail["message"] = f"{ta_name}/{ca_name} and {tb_name}/{cb_name} must share {parts[4]} — cannot sync"
         detail["context"] = "Semester-paired courses must be taught same period by their respective teachers"
+
+    elif group == "conflict_hard":
+        parts = label.split("|")
+        grp, period = parts[0], parts[1]
+        conflict_courses = data.get("conflict_groups_hard", {}).get(grp, [])
+        course_list = ", ".join(course_names.get(c, c) for c in conflict_courses)
+        detail["message"] = f"Conflict group \"{grp}\" — more than 1 section in {period}"
+        detail["context"] = f"Courses in group: {course_list}"
 
     else:
         detail["message"] = f"{label}: slack={slack_val}"
@@ -608,7 +697,8 @@ def run_solver(data_dir: Path | None = None, progress_cb=None,
                 if best_sections:
                     out_path = run_dir / "sections.csv"
                     df_out = pd.DataFrame(best_sections)
-                    df_out[["section_id", "course_id", "teacher_id", "period"]].to_csv(out_path, index=False)
+                    df_out[["section_id", "course_id", "teacher_id", "period",
+                            "total_students", "students_7th", "students_8th"]].to_csv(out_path, index=False)
 
             total_violations = sum(d["violation_count"] for d in diagnostics)
             total_time = round(time.time() - start, 1)
@@ -662,7 +752,8 @@ def run_solver(data_dir: Path | None = None, progress_cb=None,
         # Write output CSV to the run directory
         out_path = run_dir / "sections.csv"
         df_out = pd.DataFrame(sections)
-        df_out[["section_id", "course_id", "teacher_id", "period"]].to_csv(out_path, index=False)
+        df_out[["section_id", "course_id", "teacher_id", "period",
+                "total_students", "students_7th", "students_8th"]].to_csv(out_path, index=False)
 
         solve_time = round(time.time() - start, 1)
         _progress("done", f"Solved — {len(sections)} sections assigned")

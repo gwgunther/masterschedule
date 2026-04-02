@@ -24,6 +24,7 @@ interface TableDef {
   computedColumns?: string[];
   narrowColumns?: string[];
   columnLabels?: Record<string, string>;
+  groupByColumn?: string;
 }
 
 const PERIOD_OPTIONS: RefOption[] = [1, 2, 3, 4, 5, 6, 7].map(p => ({ value: String(p), label: `P${p}` }));
@@ -60,20 +61,27 @@ const TABLES: TableDef[] = [
   {
     name: "fixed_assignments",
     label: "Fixed Assignments",
-    columns: ["teacher_id", "course_id", "course_display", "period"],
+    columns: ["teacher_id", "course_id", "period"],
     teacherCols: ["teacher_id"],
     courseCols: ["course_id"],
     fixedOptions: { period: PERIOD_OPTIONS },
-    columnLabels: { teacher_id: "Teacher", course_id: "Course", course_display: "Display Name" },
+    columnLabels: { teacher_id: "Teacher", course_id: "Course" },
   },
   {
     name: "coteaching_combinations",
     label: "Co-Teaching",
-    columns: ["coteach_id", "sped_teacher", "gened_teacher", "gened_course", "num_sections", "notes"],
-    teacherCols: ["sped_teacher", "gened_teacher"],
-    courseCols: ["gened_course", "coteach_id"],
+    columns: ["gened_course_code", "gened_teacher", "swd_course_code", "swd_teacher", "num_sections", "notes"],
+    teacherCols: ["swd_teacher", "gened_teacher"],
+    courseCols: ["gened_course_code", "swd_course_code"],
     fixedOptions: { num_sections: SECTION_COUNT_OPTIONS },
-    columnLabels: { coteach_id: "Co-Teach Course", sped_teacher: "SPED Teacher", gened_teacher: "Gen Ed Teacher", gened_course: "Gen Ed Course", num_sections: "Sections" },
+    groupByColumn: "gened_course_code",
+    columnLabels: {
+      gened_course_code: "Gen Ed Course",
+      swd_course_code: "SWD Course",
+      gened_teacher: "Gen Ed Teacher",
+      swd_teacher: "SWD Teacher",
+      num_sections: "Sections",
+    },
   },
   {
     name: "semester_pairs",
@@ -82,6 +90,15 @@ const TABLES: TableDef[] = [
     teacherCols: ["teacher_a", "teacher_b"],
     courseCols: ["course_a", "course_b"],
     columnLabels: { course_a: "Course A", teacher_a: "Teacher A", course_b: "Course B", teacher_b: "Teacher B" },
+  },
+  {
+    name: "course_conflicts",
+    label: "Course Conflicts",
+    columns: ["group_name", "course_id", "constraint_type", "notes"],
+    courseCols: ["course_id"],
+    fixedOptions: { constraint_type: [{ value: "hard", label: "Hard" }, { value: "soft", label: "Soft" }] },
+    groupByColumn: "group_name",
+    columnLabels: { group_name: "Group", course_id: "Course", constraint_type: "Type" },
   },
 ];
 
@@ -149,6 +166,7 @@ export default function DataPage({ activeTable }: Props) {
             narrowColumns={tableDef.narrowColumns}
             refColumns={refColumns}
             columnLabels={tableDef.columnLabels}
+            groupByColumn={tableDef.groupByColumn}
             searchable
             onExport={() => downloadTableCsv(tableDef.name)}
           />

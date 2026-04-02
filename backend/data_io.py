@@ -30,6 +30,7 @@ TABLES: list[str] = [
     "coteaching_combinations",
     "semester_pairs",
     "departments",
+    "course_conflicts",
 ]
 
 # Default column definitions for each table (used when creating fresh DB)
@@ -99,6 +100,13 @@ _SCHEMAS: dict[str, list[tuple[str, str]]] = {
         ("scenario_id", "TEXT"),
         ("department_code", "TEXT"),
         ("display_name", "TEXT"),
+    ],
+    "course_conflicts": [
+        ("scenario_id", "TEXT"),
+        ("group_name", "TEXT"),
+        ("course_id", "TEXT"),
+        ("constraint_type", "TEXT"),
+        ("notes", "TEXT"),
     ],
 }
 

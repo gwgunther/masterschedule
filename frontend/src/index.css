@@ -105,6 +105,9 @@ body {
 
 .data-table tbody tr { border-bottom: 1px solid #e8e5de; }
 .data-table tbody tr:hover { background: #fafaf7; }
+.data-table tbody tr.group-separator { border-bottom: none; }
+.data-table tbody tr.group-separator td { padding: 0; height: 12px; border-top: 2px solid #d5d0c8; }
+.data-table tbody tr.group-separator:hover { background: transparent; }
 
 .data-table tbody td {
   padding: 9px 14px;
@@ -331,6 +334,13 @@ select.cell-input, select.cell-input-narrow {
   display: inline-flex;
   align-items: center;
   gap: 3px;
+}
+
+.pill-students {
+  font-family: 'Helvetica Neue', Arial, sans-serif;
+  font-size: 9px;
+  color: #999;
+  white-space: nowrap;
 }
 
 .pill-icons {

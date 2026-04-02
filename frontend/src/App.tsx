@@ -35,6 +35,7 @@ const SETUP_TABLES: { name: TableName; label: string }[] = [
   { name: "fixed_assignments", label: "Fixed Assignments" },
   { name: "coteaching_combinations", label: "Co-Teaching" },
   { name: "semester_pairs", label: "Semester Pairs" },
+  { name: "course_conflicts", label: "Course Conflicts" },
 ];
 
 type ScheduleTab = "schedule" | "diagnostics" | "validation";
