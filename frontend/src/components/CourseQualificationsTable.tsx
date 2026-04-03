@@ -45,7 +45,7 @@ export default function CourseQualificationsTable({ teacherOptions, onExport }: 
   const [search, setSearch] = useState("");
   const [addingFor, setAddingFor] = useState<string | null>(null); // course_id
   const [addSearch, setAddSearch] = useState("");
-  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<number | null>(null);
   const addRef = useRef<HTMLDivElement>(null);
 
   const load = useCallback(async () => {
@@ -91,8 +91,23 @@ export default function CourseQualificationsTable({ teacherOptions, onExport }: 
     setTimeout(() => setToast(null), 3000);
   }
 
-  function handleCellChange(courseId: string, col: string, value: string) {
-    setCourses(prev => prev.map(c => c.course_id === courseId ? { ...c, [col]: value } : c));
+  function handleCellChange(idx: number, col: string, value: string) {
+    setCourses(prev => {
+      const next = [...prev];
+      const oldId = next[idx].course_id;
+      next[idx] = { ...next[idx], [col]: value };
+      // If course_id changed, migrate the qualMap key
+      if (col === "course_id" && oldId !== value) {
+        setQualMap(qm => {
+          const nextQm = new Map(qm);
+          const existing = nextQm.get(oldId) ?? new Set();
+          nextQm.delete(oldId);
+          nextQm.set(value, existing);
+          return nextQm;
+        });
+      }
+      return next;
+    });
     setDirty(true);
   }
 
@@ -105,9 +120,12 @@ export default function CourseQualificationsTable({ teacherOptions, onExport }: 
     setDirty(true);
   }
 
-  function deleteCourse(courseId: string) {
-    setCourses(prev => prev.filter(c => c.course_id !== courseId));
-    setQualMap(prev => { const next = new Map(prev); next.delete(courseId); return next; });
+  function deleteCourse(idx: number) {
+    setCourses(prev => {
+      const courseId = prev[idx].course_id;
+      setQualMap(qm => { const next = new Map(qm); next.delete(courseId); return next; });
+      return prev.filter((_, i) => i !== idx);
+    });
     setDirty(true);
     setConfirmDelete(null);
   }
@@ -188,16 +206,18 @@ export default function CourseQualificationsTable({ teacherOptions, onExport }: 
     );
   }
 
-  const filteredCourses = courses.filter(c => {
-    if (!search.trim()) return true;
-    const q = search.toLowerCase();
-    const quals = [...(qualMap.get(c.course_id) ?? [])].map(tid => teacherMap.get(tid) ?? tid).join(" ").toLowerCase();
-    return (
-      c.course_id.toLowerCase().includes(q) ||
-      (c.course_title ?? "").toLowerCase().includes(q) ||
-      quals.includes(q)
-    );
-  });
+  const filteredCourses = courses
+    .map((course, originalIdx) => ({ course, originalIdx }))
+    .filter(({ course }) => {
+      if (!search.trim()) return true;
+      const q = search.toLowerCase();
+      const quals = [...(qualMap.get(course.course_id) ?? [])].map(tid => teacherMap.get(tid) ?? tid).join(" ").toLowerCase();
+      return (
+        course.course_id.toLowerCase().includes(q) ||
+        (course.course_title ?? "").toLowerCase().includes(q) ||
+        quals.includes(q)
+      );
+    });
 
   const SECTION_OPTIONS = Array.from({ length: 20 }, (_, i) => String(i + 1));
 
@@ -262,9 +282,9 @@ export default function CourseQualificationsTable({ teacherOptions, onExport }: 
               </tr>
             </thead>
             <tbody>
-              {filteredCourses.map(course => {
+              {filteredCourses.map(({ course, originalIdx }) => {
                 const quals = [...(qualMap.get(course.course_id) ?? [])].sort();
-                const isAddingHere = addingFor === course.course_id;
+                const isAddingHere = addingFor === String(originalIdx);
 
                 const available = teacherOptions.filter(t =>
                   !quals.includes(t.value) &&
@@ -272,37 +292,37 @@ export default function CourseQualificationsTable({ teacherOptions, onExport }: 
                 );
 
                 return (
-                  <tr key={course.course_id}>
+                  <tr key={originalIdx}>
                     <td style={{ whiteSpace: "nowrap" }}>
                       <input className="cell-input" value={course.course_id}
-                        onChange={e => handleCellChange(course.course_id, "course_id", e.target.value)} />
+                        onChange={e => handleCellChange(originalIdx, "course_id", e.target.value)} />
                     </td>
                     <td>
                       <input className="cell-input" value={course.course_title ?? ""}
-                        onChange={e => handleCellChange(course.course_id, "course_title", e.target.value)} />
+                        onChange={e => handleCellChange(originalIdx, "course_title", e.target.value)} />
                     </td>
                     <td style={{ textAlign: "center" }}>
                       <input className="cell-input-narrow" value={course.enrollment_7th ?? ""}
-                        onChange={e => handleCellChange(course.course_id, "enrollment_7th", e.target.value)} />
+                        onChange={e => handleCellChange(originalIdx, "enrollment_7th", e.target.value)} />
                     </td>
                     <td style={{ textAlign: "center" }}>
                       <input className="cell-input-narrow" value={course.enrollment_8th ?? ""}
-                        onChange={e => handleCellChange(course.course_id, "enrollment_8th", e.target.value)} />
+                        onChange={e => handleCellChange(originalIdx, "enrollment_8th", e.target.value)} />
                     </td>
                     <td style={{ textAlign: "center" }}>
                       <input className="cell-input-narrow" value={course.total_enrollment ?? ""}
-                        onChange={e => handleCellChange(course.course_id, "total_enrollment", e.target.value)} />
+                        onChange={e => handleCellChange(originalIdx, "total_enrollment", e.target.value)} />
                     </td>
                     <td style={{ textAlign: "center" }}>
                       <select className="cell-input-narrow" value={course.num_sections ?? ""}
-                        onChange={e => handleCellChange(course.course_id, "num_sections", e.target.value)}>
+                        onChange={e => handleCellChange(originalIdx, "num_sections", e.target.value)}>
                         <option value="">—</option>
                         {SECTION_OPTIONS.map(n => <option key={n} value={n}>{n}</option>)}
                       </select>
                     </td>
                     <td style={{ textAlign: "center" }}>
                       <input className="cell-input-narrow" value={course.max_class_size ?? ""}
-                        onChange={e => handleCellChange(course.course_id, "max_class_size", e.target.value)} />
+                        onChange={e => handleCellChange(originalIdx, "max_class_size", e.target.value)} />
                     </td>
 
                     {/* Status (computed) */}
@@ -327,7 +347,7 @@ export default function CourseQualificationsTable({ teacherOptions, onExport }: 
                         <div ref={isAddingHere ? addRef : undefined} style={{ position: "relative" }}>
                           <button
                             className="qual-add-btn"
-                            onClick={() => { setAddingFor(isAddingHere ? null : course.course_id); setAddSearch(""); }}
+                            onClick={() => { setAddingFor(isAddingHere ? null : String(originalIdx)); setAddSearch(""); }}
                           >
                             + Add
                           </button>
@@ -367,19 +387,19 @@ export default function CourseQualificationsTable({ teacherOptions, onExport }: 
                         className="notes-textarea"
                         value={course.notes ?? ""}
                         rows={1}
-                        onChange={e => handleCellChange(course.course_id, "notes", e.target.value)}
+                        onChange={e => handleCellChange(originalIdx, "notes", e.target.value)}
                       />
                     </td>
 
                     {/* Delete action */}
                     <td style={{ width: 40, padding: "0 4px", position: "relative" }}>
-                      {confirmDelete === course.course_id ? (
+                      {confirmDelete === originalIdx ? (
                         <div className="delete-confirm">
-                          <button className="delete-confirm-yes" onClick={() => deleteCourse(course.course_id)}>Delete</button>
+                          <button className="delete-confirm-yes" onClick={() => deleteCourse(originalIdx)}>Delete</button>
                           <button className="delete-confirm-no" onClick={() => setConfirmDelete(null)}>Cancel</button>
                         </div>
                       ) : (
-                        <button className="row-action-btn" onClick={() => setConfirmDelete(course.course_id)} title="Row actions">
+                        <button className="row-action-btn" onClick={() => setConfirmDelete(originalIdx)} title="Row actions">
                           ⋯
                         </button>
                       )}

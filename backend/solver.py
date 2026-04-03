@@ -34,14 +34,14 @@ CONSTRAINT_GROUPS = {
 
 def _load_data(data_dir: Path) -> dict:
     """Load and parse all input data from a run directory."""
-    df_courses = pd.read_csv(data_dir / "courses.csv")
-    df_teachers = pd.read_csv(data_dir / "teachers.csv")
-    df_quals = pd.read_csv(data_dir / "teacher_qualifications.csv")
-    df_locks = pd.read_csv(data_dir / "teacher_section_locks.csv")
-    df_constraints = pd.read_csv(data_dir / "fixed_assignments.csv")
-    df_coteach = pd.read_csv(data_dir / "coteaching_combinations.csv")
-    df_pairs = pd.read_csv(data_dir / "semester_pairs.csv")
-    df_conflicts = pd.read_csv(data_dir / "course_conflicts.csv")
+    df_courses = pd.read_csv(data_dir / "courses.csv").dropna(subset=["course_id"])
+    df_teachers = pd.read_csv(data_dir / "teachers.csv").dropna(subset=["teacher_id"])
+    df_quals = pd.read_csv(data_dir / "teacher_qualifications.csv").dropna(subset=["teacher_id", "course_id"])
+    df_locks = pd.read_csv(data_dir / "teacher_section_locks.csv").dropna(subset=["teacher_id", "course_id", "num_sections"])
+    df_constraints = pd.read_csv(data_dir / "fixed_assignments.csv").dropna(subset=["teacher_id", "course_id", "period"])
+    df_coteach = pd.read_csv(data_dir / "coteaching_combinations.csv").dropna(subset=["swd_teacher", "swd_course_code", "gened_teacher", "gened_course_code", "num_sections"])
+    df_pairs = pd.read_csv(data_dir / "semester_pairs.csv").dropna(subset=["course_a", "teacher_a", "course_b", "teacher_b"])
+    df_conflicts = pd.read_csv(data_dir / "course_conflicts.csv").dropna(subset=["group_name", "course_id"])
 
     for col in ("enrollment_7th", "enrollment_8th", "total_enrollment", "num_sections"):
         df_courses[col] = pd.to_numeric(df_courses[col], errors="coerce").fillna(0).astype(int)
@@ -196,9 +196,39 @@ def _build_problem(data: dict, elastic: bool = False):
     soft_max_v = pulp.LpVariable.dicts("soft_conf_max", soft_groups, lowBound=0, cat="Integer")
     soft_min_v = pulp.LpVariable.dicts("soft_conf_min", soft_groups, lowBound=0, cat="Integer")
 
+    # Grade-level enrollment balance variables — one deviation pair per period per grade
+    # Per-section enrollment: distribute course enrollment evenly across its sections
+    per_sec_enroll_7 = {
+        c: enrollment["enrollment_7th"].get(c, 0) / max(1, enrollment["num_sections"].get(c, 0))
+        for c in courses
+    }
+    per_sec_enroll_8 = {
+        c: enrollment["enrollment_8th"].get(c, 0) / max(1, enrollment["num_sections"].get(c, 0))
+        for c in courses
+    }
+    total_seats_7 = sum(
+        enrollment["enrollment_7th"].get(c, 0)
+        for c in courses if c not in non_instr
+    )
+    total_seats_8 = sum(
+        enrollment["enrollment_8th"].get(c, 0)
+        for c in courses if c not in non_instr
+    )
+    target_7 = total_seats_7 / len(periods)
+    target_8 = total_seats_8 / len(periods)
+
+    grade7_dev_pos = pulp.LpVariable.dicts("grade7_dev_pos", periods, lowBound=0)
+    grade7_dev_neg = pulp.LpVariable.dicts("grade7_dev_neg", periods, lowBound=0)
+    grade8_dev_pos = pulp.LpVariable.dicts("grade8_dev_pos", periods, lowBound=0)
+    grade8_dev_neg = pulp.LpVariable.dicts("grade8_dev_neg", periods, lowBound=0)
+
     class_size_obj = pulp.lpSum(pos_dev[c] + neg_dev[c] for c in courses)
     distribution_obj = pulp.lpSum(track_max_v[tr] - track_min_v[tr] for tr in tracks)
     conflict_spread_obj = pulp.lpSum(soft_max_v[g] - soft_min_v[g] for g in soft_groups) if soft_groups else 0
+    grade_balance_obj = pulp.lpSum(
+        grade7_dev_pos[p] + grade7_dev_neg[p] + grade8_dev_pos[p] + grade8_dev_neg[p]
+        for p in periods
+    )
     slack_penalty = pulp.LpAffineExpression()  # filled if elastic
 
     # ── Constraints ───────────────────────────────────────────────────
@@ -223,6 +253,19 @@ def _build_problem(data: dict, elastic: bool = False):
         for p in periods:
             prob += track_count[tr, p] <= track_max_v[tr], f"track_max_{tr}_{p}"
             prob += track_count[tr, p] >= track_min_v[tr], f"track_min_{tr}_{p}"
+
+    # Grade-level enrollment balance definitions — always included
+    for p in periods:
+        seats_7 = pulp.lpSum(
+            x[t, c, p] * per_sec_enroll_7[c]
+            for t in teachers for c in courses if c not in non_instr
+        )
+        seats_8 = pulp.lpSum(
+            x[t, c, p] * per_sec_enroll_8[c]
+            for t in teachers for c in courses if c not in non_instr
+        )
+        prob += seats_7 - target_7 == grade7_dev_pos[p] - grade7_dev_neg[p], f"grade7_bal_{p}"
+        prob += seats_8 - target_8 == grade8_dev_pos[p] - grade8_dev_neg[p], f"grade8_bal_{p}"
 
     # 2. Conference: each teacher exactly one CONFERENCE period
     #    Skip teachers who have no CONFERENCE in their section_locks (e.g. teach all 7 periods)
@@ -421,7 +464,7 @@ def _build_problem(data: dict, elastic: bool = False):
             prob += soft_count[g, p] >= soft_min_v[g], f"soft_conf_min_{g}_{p}"
 
     # Set objective
-    prob += class_size_obj + 1000 * distribution_obj + 1000 * conflict_spread_obj + slack_penalty
+    prob += class_size_obj + 1000 * distribution_obj + 1000 * conflict_spread_obj + 10 * grade_balance_obj + slack_penalty
 
     return prob, x, slacks
 
@@ -650,7 +693,7 @@ def run_solver(data_dir: Path | None = None, progress_cb=None,
         num_constraints = len(prob.constraints)
         _progress("solving", f"Solving ({num_vars:,} variables, {num_constraints:,} constraints)...")
 
-        solver = pulp.PULP_CBC_CMD(msg=0)
+        solver = pulp.PULP_CBC_CMD(msg=0, timeLimit=60)
         prob.solve(solver)
         solve_time = round(time.time() - start, 1)
 
@@ -668,14 +711,18 @@ def run_solver(data_dir: Path | None = None, progress_cb=None,
             diag_start = time.time()
             prob_e, x_e, slacks = _build_problem(data, elastic=True)
 
-            _progress("diagnosing", "Solving relaxed model...")
-            prob_e.solve(pulp.PULP_CBC_CMD(msg=0))
+            _progress("diagnosing", "Solving relaxed model (up to 90s)...")
+            prob_e.solve(pulp.PULP_CBC_CMD(msg=0, timeLimit=90))
             diag_time = round(time.time() - diag_start, 1)
 
             diagnostics = []
             best_sections = None
 
-            if prob_e.status == pulp.LpStatusOptimal:
+            elastic_feasible = prob_e.sol_status in (
+                pulp.constants.LpSolutionOptimal,
+                pulp.constants.LpSolutionIntegerFeasible,
+            )
+            if elastic_feasible:
                 diagnostics = _analyze_diagnostics(slacks, data)
 
                 # Extract partial schedule from relaxed solution
