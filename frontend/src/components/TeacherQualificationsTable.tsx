@@ -5,7 +5,6 @@ interface Teacher {
   teacher_id: string;
   full_name: string;
   department: string;
-  max_sections: string;
   [key: string]: unknown;
 }
 
@@ -30,38 +29,63 @@ interface Props {
   onExport?: () => void;
 }
 
+/** Parse comma-separated department string → Set */
+function parseDepts(raw: string): Set<string> {
+  return new Set(raw.split(",").map(s => s.trim()).filter(Boolean));
+}
+/** Serialize Set → comma-separated string */
+function serializeDepts(s: Set<string>): string {
+  return [...s].sort().join(", ");
+}
+
 export default function TeacherQualificationsTable({ courseOptions, deptOptions, onExport }: Props) {
   const [teachers, setTeachers] = useState<Teacher[]>([]);
   const [qualMap, setQualMap] = useState<Map<string, Set<string>>>(new Map());
+  const [assignedMap, setAssignedMap] = useState<Map<string, string[]>>(new Map()); // teacher_id → course_ids
   const [courses, setCourses] = useState<Course[]>([]);
   const [loading, setLoading] = useState(true);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState<{ type: "ok" | "err"; msg: string } | null>(null);
   const [search, setSearch] = useState("");
-  const [addingFor, setAddingFor] = useState<string | null>(null);
+  const [addingQualFor, setAddingQualFor] = useState<string | null>(null);
+  const [addingDeptFor, setAddingDeptFor] = useState<string | null>(null);
   const [addSearch, setAddSearch] = useState("");
-  const [confirmDelete, setConfirmDelete] = useState<string | null>(null); // teacher_id
+  const [deptSearch, setDeptSearch] = useState("");
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const addRef = useRef<HTMLDivElement>(null);
+  const deptRef = useRef<HTMLDivElement>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [teacherRows, qualRows, courseRows] = await Promise.all([
+      const [teacherRows, qualRows, courseRows, lockRows] = await Promise.all([
         fetchTable("teachers"),
         fetchTable("teacher_qualifications"),
         fetchTable("courses"),
+        fetchTable("teacher_section_locks"),
       ]);
       setTeachers(teacherRows as Teacher[]);
       setCourses(courseRows as Course[]);
 
-      const map = new Map<string, Set<string>>();
-      for (const t of teacherRows as Teacher[]) map.set(t.teacher_id, new Set());
+      const qmap = new Map<string, Set<string>>();
+      for (const t of teacherRows as Teacher[]) qmap.set(t.teacher_id, new Set());
       for (const q of qualRows as { teacher_id: string; course_id: string }[]) {
-        if (!map.has(q.teacher_id)) map.set(q.teacher_id, new Set());
-        map.get(q.teacher_id)!.add(q.course_id);
+        if (!qmap.has(q.teacher_id)) qmap.set(q.teacher_id, new Set());
+        qmap.get(q.teacher_id)!.add(q.course_id);
       }
-      setQualMap(map);
+      setQualMap(qmap);
+
+      // Assigned to: group locks by teacher, collect unique course_ids (exclude CONFERENCE)
+      const amap = new Map<string, string[]>();
+      for (const r of lockRows as { teacher_id: string; course_id: string; num_sections?: number }[]) {
+        if (r.course_id === "CONFERENCE") continue;
+        const tid = r.teacher_id;
+        if (!amap.has(tid)) amap.set(tid, []);
+        amap.get(tid)!.push(r.course_id);
+      }
+      setAssignedMap(amap);
+
       setDirty(false);
     } finally {
       setLoading(false);
@@ -73,8 +97,10 @@ export default function TeacherQualificationsTable({ courseOptions, deptOptions,
   useEffect(() => {
     function handleClick(e: MouseEvent) {
       if (addRef.current && !addRef.current.contains(e.target as Node)) {
-        setAddingFor(null);
-        setAddSearch("");
+        setAddingQualFor(null); setAddSearch("");
+      }
+      if (deptRef.current && !deptRef.current.contains(e.target as Node)) {
+        setAddingDeptFor(null); setDeptSearch("");
       }
     }
     document.addEventListener("mousedown", handleClick);
@@ -91,19 +117,36 @@ export default function TeacherQualificationsTable({ courseOptions, deptOptions,
     setDirty(true);
   }
 
+  function addDept(teacherId: string, deptValue: string) {
+    setTeachers(prev => prev.map(t => {
+      if (t.teacher_id !== teacherId) return t;
+      const depts = parseDepts(String(t.department ?? ""));
+      depts.add(deptValue);
+      return { ...t, department: serializeDepts(depts) };
+    }));
+    setDirty(true);
+    setDeptSearch("");
+  }
+
+  function removeDept(teacherId: string, deptValue: string) {
+    setTeachers(prev => prev.map(t => {
+      if (t.teacher_id !== teacherId) return t;
+      const depts = parseDepts(String(t.department ?? ""));
+      depts.delete(deptValue);
+      return { ...t, department: serializeDepts(depts) };
+    }));
+    setDirty(true);
+  }
+
   function addTeacher() {
-    const empty: Teacher = { teacher_id: "", full_name: "", department: "", max_sections: "" };
+    const empty: Teacher = { teacher_id: "", full_name: "", department: "" };
     setTeachers(prev => [...prev, empty]);
     setDirty(true);
   }
 
   function deleteTeacher(teacherId: string) {
     setTeachers(prev => prev.filter(t => t.teacher_id !== teacherId));
-    setQualMap(prev => {
-      const next = new Map(prev);
-      next.delete(teacherId);
-      return next;
-    });
+    setQualMap(prev => { const next = new Map(prev); next.delete(teacherId); return next; });
     setDirty(true);
     setConfirmDelete(null);
   }
@@ -137,9 +180,7 @@ export default function TeacherQualificationsTable({ courseOptions, deptOptions,
       await saveTable("teachers", teachers);
       const qualRows: { teacher_id: string; course_id: string }[] = [];
       for (const [tid, courseSet] of qualMap.entries()) {
-        for (const cid of courseSet) {
-          qualRows.push({ teacher_id: tid, course_id: cid });
-        }
+        for (const cid of courseSet) qualRows.push({ teacher_id: tid, course_id: cid });
       }
       await saveTable("teacher_qualifications", qualRows);
       setDirty(false);
@@ -152,6 +193,7 @@ export default function TeacherQualificationsTable({ courseOptions, deptOptions,
   }
 
   const courseMap = new Map(courses.map(c => [c.course_id, c.course_title]));
+  const deptMap = new Map(deptOptions.map(d => [d.value, d.label]));
 
   const filteredTeachers = teachers.filter(t => {
     if (!search.trim()) return true;
@@ -212,22 +254,29 @@ export default function TeacherQualificationsTable({ courseOptions, deptOptions,
           <table className="data-table" style={{ tableLayout: "auto", width: "100%" }}>
             <thead>
               <tr>
-                <th style={{ whiteSpace: "nowrap", minWidth: 180 }}>teacher id</th>
-                <th style={{ whiteSpace: "nowrap", minWidth: 180 }}>full name</th>
-                <th style={{ whiteSpace: "nowrap", minWidth: 160 }}>department</th>
-                <th style={{ whiteSpace: "nowrap", minWidth: 80, textAlign: "center" }}>max sections</th>
+                <th style={{ whiteSpace: "nowrap", minWidth: 150 }}>teacher id</th>
+                <th style={{ whiteSpace: "nowrap", minWidth: 150 }}>full name</th>
+                <th style={{ whiteSpace: "nowrap", minWidth: 160 }}>department(s)</th>
                 <th>qualified courses</th>
+                <th style={{ minWidth: 200 }}>assigned to <span style={{ fontWeight: 400, color: "#bbb", fontSize: 10 }}>(from section quotas)</span></th>
                 <th style={{ width: 40 }} />
               </tr>
             </thead>
             <tbody>
               {filteredTeachers.map(teacher => {
                 const quals = [...(qualMap.get(teacher.teacher_id) ?? [])].sort();
-                const isAddingHere = addingFor === teacher.teacher_id;
+                const depts = parseDepts(String(teacher.department ?? ""));
+                const assigned = assignedMap.get(teacher.teacher_id) ?? [];
+                const isAddingQual = addingQualFor === teacher.teacher_id;
+                const isAddingDept = addingDeptFor === teacher.teacher_id;
 
-                const available = courseOptions.filter(c =>
+                const availableQuals = courseOptions.filter(c =>
                   !quals.includes(c.value) &&
                   (!addSearch.trim() || c.label.toLowerCase().includes(addSearch.toLowerCase()))
+                );
+                const availableDepts = deptOptions.filter(d =>
+                  !depts.has(d.value) &&
+                  (!deptSearch.trim() || d.label.toLowerCase().includes(deptSearch.toLowerCase()))
                 );
 
                 return (
@@ -240,24 +289,45 @@ export default function TeacherQualificationsTable({ courseOptions, deptOptions,
                       <input className="cell-input" value={teacher.full_name ?? ""}
                         onChange={e => handleCellChange(teacher.teacher_id, "full_name", e.target.value)} />
                     </td>
-                    <td style={{ whiteSpace: "nowrap" }}>
-                      <select className="cell-input" value={teacher.department ?? ""}
-                        onChange={e => handleCellChange(teacher.teacher_id, "department", e.target.value)}>
-                        <option value="">—</option>
-                        {deptOptions.map(d => (
-                          <option key={d.value} value={d.value}>{d.label}</option>
+
+                    {/* Department(s) — multi-select tag UI */}
+                    <td style={{ position: "relative" }}>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 4, alignItems: "center", padding: "2px 0" }}>
+                        {[...depts].sort().map(dv => (
+                          <span key={dv} className="qual-tag" title={deptMap.get(dv) ?? dv}>
+                            <span className="qual-tag-label">{deptMap.get(dv) ?? dv}</span>
+                            <button className="qual-tag-remove" onClick={() => removeDept(teacher.teacher_id, dv)} title="Remove">×</button>
+                          </span>
                         ))}
-                      </select>
-                    </td>
-                    <td style={{ whiteSpace: "nowrap", textAlign: "center" }}>
-                      <select className="cell-input" style={{ width: 56, textAlign: "center" }}
-                        value={teacher.max_sections ?? ""}
-                        onChange={e => handleCellChange(teacher.teacher_id, "max_sections", e.target.value)}>
-                        <option value="">—</option>
-                        {Array.from({ length: 10 }, (_, i) => (
-                          <option key={i + 1} value={String(i + 1)}>{i + 1}</option>
-                        ))}
-                      </select>
+                        <div ref={isAddingDept ? deptRef : undefined} style={{ position: "relative" }}>
+                          <button
+                            className="qual-add-btn"
+                            onClick={() => { setAddingDeptFor(isAddingDept ? null : teacher.teacher_id); setDeptSearch(""); setAddingQualFor(null); }}
+                          >+ Add</button>
+                          {isAddingDept && (
+                            <div className="qual-dropdown">
+                              <input
+                                autoFocus
+                                className="qual-search"
+                                placeholder="Search departments…"
+                                value={deptSearch}
+                                onChange={e => setDeptSearch(e.target.value)}
+                              />
+                              <div className="qual-dropdown-list">
+                                {availableDepts.length === 0 ? (
+                                  <div className="qual-dropdown-empty">No more departments</div>
+                                ) : (
+                                  availableDepts.map(d => (
+                                    <button key={d.value} className="qual-dropdown-item" onClick={() => addDept(teacher.teacher_id, d.value)}>
+                                      <span className="qual-dropdown-title">{d.label}</span>
+                                    </button>
+                                  ))
+                                )}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
                     </td>
 
                     {/* Qualifications column */}
@@ -266,22 +336,15 @@ export default function TeacherQualificationsTable({ courseOptions, deptOptions,
                         {quals.map(cid => (
                           <span key={cid} className="qual-tag" title={courseMap.get(cid) ?? cid}>
                             <span className="qual-tag-label">{courseMap.get(cid) ?? cid}</span>
-                            <button
-                              className="qual-tag-remove"
-                              onClick={() => removeQual(teacher.teacher_id, cid)}
-                              title="Remove"
-                            >×</button>
+                            <button className="qual-tag-remove" onClick={() => removeQual(teacher.teacher_id, cid)} title="Remove">×</button>
                           </span>
                         ))}
-
-                        <div ref={isAddingHere ? addRef : undefined} style={{ position: "relative" }}>
+                        <div ref={isAddingQual ? addRef : undefined} style={{ position: "relative" }}>
                           <button
                             className="qual-add-btn"
-                            onClick={() => { setAddingFor(isAddingHere ? null : teacher.teacher_id); setAddSearch(""); }}
-                          >
-                            + Add
-                          </button>
-                          {isAddingHere && (
+                            onClick={() => { setAddingQualFor(isAddingQual ? null : teacher.teacher_id); setAddSearch(""); setAddingDeptFor(null); }}
+                          >+ Add</button>
+                          {isAddingQual && (
                             <div className="qual-dropdown">
                               <input
                                 autoFocus
@@ -291,15 +354,11 @@ export default function TeacherQualificationsTable({ courseOptions, deptOptions,
                                 onChange={e => setAddSearch(e.target.value)}
                               />
                               <div className="qual-dropdown-list">
-                                {available.length === 0 ? (
+                                {availableQuals.length === 0 ? (
                                   <div className="qual-dropdown-empty">No matches</div>
                                 ) : (
-                                  available.slice(0, 50).map(c => (
-                                    <button
-                                      key={c.value}
-                                      className="qual-dropdown-item"
-                                      onClick={() => addQual(teacher.teacher_id, c.value)}
-                                    >
+                                  availableQuals.slice(0, 50).map(c => (
+                                    <button key={c.value} className="qual-dropdown-item" onClick={() => addQual(teacher.teacher_id, c.value)}>
                                       <span className="qual-dropdown-id">{c.value}</span>
                                       <span className="qual-dropdown-title">{courseMap.get(c.value) ?? ""}</span>
                                     </button>
@@ -312,6 +371,20 @@ export default function TeacherQualificationsTable({ courseOptions, deptOptions,
                       </div>
                     </td>
 
+                    {/* Assigned to — read-only from section quotas */}
+                    <td>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 4, padding: "2px 0" }}>
+                        {assigned.length === 0
+                          ? <span style={{ color: "#ccc", fontSize: 11 }}>—</span>
+                          : assigned.map(cid => (
+                            <span key={cid} className="qual-tag qual-tag-assigned" title={courseMap.get(cid) ?? cid}>
+                              <span className="qual-tag-label">{courseMap.get(cid) ?? cid}</span>
+                            </span>
+                          ))
+                        }
+                      </div>
+                    </td>
+
                     {/* Delete action */}
                     <td style={{ width: 40, padding: "0 4px", position: "relative" }}>
                       {confirmDelete === teacher.teacher_id ? (
@@ -320,9 +393,7 @@ export default function TeacherQualificationsTable({ courseOptions, deptOptions,
                           <button className="delete-confirm-no" onClick={() => setConfirmDelete(null)}>Cancel</button>
                         </div>
                       ) : (
-                        <button className="row-action-btn" onClick={() => setConfirmDelete(teacher.teacher_id)} title="Row actions">
-                          ⋯
-                        </button>
+                        <button className="row-action-btn" onClick={() => setConfirmDelete(teacher.teacher_id)} title="Row actions">⋯</button>
                       )}
                     </td>
                   </tr>

@@ -297,8 +297,7 @@ select.cell-input, select.cell-input-narrow {
   background: #fff; position: sticky; top: 0; z-index: 10;
 }
 
-.schedule-table thead th:first-child,
-.schedule-table thead th:nth-child(2) { text-align: left; }
+.schedule-table thead th:first-child { text-align: left; }
 
 .schedule-table .dept-row td {
   font-family: 'Helvetica Neue', Arial, sans-serif;
@@ -320,7 +319,7 @@ select.cell-input, select.cell-input-narrow {
 .schedule-table tbody td:nth-child(2) { color: #888; font-size: 11px; }
 
 /* ── Course pills ────────────────────────────────────────────────────── */
-.period-cell { padding: 5px 10px !important; }
+.period-cell { padding: 5px 10px 5px 26px !important; position: relative; }
 
 .course-pill {
   display: inline-block;
@@ -333,8 +332,9 @@ select.cell-input, select.cell-input-narrow {
 
 .period-cell-inner {
   display: inline-flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 3px;
+  flex-wrap: wrap;
 }
 
 .pill-students {
@@ -344,20 +344,100 @@ select.cell-input, select.cell-input-narrow {
   white-space: nowrap;
 }
 
-/* ── Schedule Grid Summary Footer ───────────────────────────────── */
-.schedule-summary { border-top: 2px solid #e0ddd5; }
-.summary-label-row td { height: 8px; }
-.summary-spacer td { height: 4px; }
-.summary-row td {
+/* ── Schedule Grid Inline Summary Rows ───────────────────────────── */
+.summary-tbody { border-bottom: 2px solid #e0ddd5; }
+
+.sum-row td {
+  font-family: 'Helvetica Neue', Arial, sans-serif;
+  font-size: 10px;
+  background: #fafaf8;
+  border-top: 1px solid #f0ede8;
+  padding: 3px 6px;
+}
+.sum-label {
+  text-align: right;
+  font-size: 9px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.05em;
+  color: #aaa; white-space: nowrap;
+  padding-right: 10px;
+}
+.sum-cell { text-align: center; }
+
+/* Shared trio layout */
+.tfoot-trio {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 3px;
+  white-space: nowrap;
+}
+.tfoot-sub { color: #777; font-size: 10px; }
+.tfoot-sep { color: #ddd; font-size: 8px; }
+.tfoot-total { font-weight: 600; color: #1a1a1a; font-size: 10px; }
+.tfoot-g { font-size: 7px; color: #ccc; vertical-align: super; margin-right: 1px; }
+
+/* Stacked aggregate cell (rowspan=3, right side) */
+.sum-agg {
+  background: #f5f4f0 !important;
+  border-left: 2px solid #e0ddd5 !important;
+  vertical-align: middle;
+  padding: 8px 16px !important;
+}
+.sum-agg-block { margin-bottom: 6px; }
+.sum-agg-block:last-child { margin-bottom: 0; }
+.sum-agg-label {
+  font-size: 8px; text-transform: uppercase; letter-spacing: 0.06em;
+  color: #bbb; margin-bottom: 2px; white-space: nowrap;
+}
+.sum-agg-vals { display: flex; align-items: baseline; justify-content: space-between; }
+.sum-agg-val { font-size: 12px; color: #555; white-space: nowrap; }
+.sum-agg-bold { font-weight: 700; color: #1a1a1a; font-size: 13px; }
+
+/* Sub-header row above the teacher rows — matches main thead style */
+.grid-subheader th {
+  font-family: 'Helvetica Neue', Arial, sans-serif;
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #888;
+  font-weight: 500;
+  padding: 10px 12px;
+  border-bottom: 1px solid #e8e4de;
+  border-top: 2px solid #d0ccc4;
+  text-align: center;
+  white-space: nowrap;
+  background: #faf9f6;
+}
+.grid-subheader th:first-child { text-align: left; }
+
+/* Per-teacher stat columns */
+.teacher-stat-th {
+  font-size: 10px;
+  color: #888;
+  text-align: right;
+  border-left: 1px solid #e0ddd5;
+  padding: 4px 6px;
+  white-space: normal;
+  width: 48px;
+  min-width: 48px;
+  max-width: 48px;
+}
+.teacher-stat-cell {
+  text-align: right;
+  padding: 4px 6px;
   font-family: 'Helvetica Neue', Arial, sans-serif;
   font-size: 11px;
   color: #666;
-  padding: 2px 8px;
+  border-left: 1px solid #f0ede8;
   white-space: nowrap;
+  width: 48px;
+  min-width: 48px;
+  max-width: 48px;
 }
-.summary-label { text-align: right; font-weight: 400; color: #999; }
-.summary-cell { text-align: center; }
-.summary-row-bold td { font-weight: 600; color: #1a1a1a; }
+.teacher-stat-total {
+  font-weight: 600;
+  color: #1a1a1a;
+}
+
 .summary-pos { color: #166534; }
 .summary-neg { color: #b91c1c; }
 
@@ -365,6 +445,10 @@ select.cell-input, select.cell-input-narrow {
   display: inline-flex;
   align-items: center;
   gap: 1px;
+  position: absolute;
+  left: 4px;
+  top: 50%;
+  transform: translateY(-50%);
 }
 
 .pill-icon {
@@ -373,8 +457,157 @@ select.cell-input, select.cell-input-narrow {
   color: #bbb;
 }
 
+.pill-icon-data {
+  display: block;
+  flex-shrink: 0;
+  color: #bbb;
+}
+
+.pill-icon-grid {
+  display: block;
+  flex-shrink: 0;
+  color: #3b82f6;
+}
+
+/* Grid-locked cells */
+.period-cell.grid-locked {
+  background: #eff6ff;
+  outline: 1px solid #93c5fd;
+  outline-offset: -1px;
+}
+
+/* Lockable cells show pointer cursor */
+.period-cell.lockable {
+  cursor: pointer;
+}
+.period-cell.lockable:hover {
+  background: #f5f4f0;
+}
+.period-cell.grid-locked.lockable:hover {
+  background: #dbeafe;
+}
+
+.period-cell.drag-over {
+  background: #dbeafe;
+  outline: 2px dashed #3b82f6;
+  outline-offset: -2px;
+}
+.period-cell[draggable="true"] { cursor: grab; }
+.period-cell[draggable="true"]:active { cursor: grabbing; }
+
+/* Unlock All button */
+.unlock-all-btn {
+  padding: 2px 10px;
+  font-size: 11px;
+  font-family: 'Helvetica Neue', Arial, sans-serif;
+  background: #fff;
+  border: 1px solid #93c5fd;
+  border-radius: 4px;
+  color: #1e40af;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+.unlock-all-btn:hover {
+  background: #dbeafe;
+}
+
+.pill-grade-label {
+  font-size: 8px;
+  color: #bbb;
+  vertical-align: super;
+  margin-right: 1px;
+  font-style: normal;
+}
+.pill-grade-sep { color: #ddd; }
 .pill-empty { color: #ddd; font-size: 11px; }
 .pill-conf { background: #f9f8f3; border-color: #e0ddd5; color: #aaa; font-style: italic; }
+
+/* ── Schedule List View ──────────────────────────────────────────────── */
+
+.slist-summary {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  padding: 10px 32px;
+  background: #fafaf8;
+  border-bottom: 1px solid #e0ddd5;
+  font-family: 'Helvetica Neue', Arial, sans-serif;
+  flex-wrap: wrap;
+}
+.slist-summary-item {
+  display: flex;
+  flex-direction: column;
+  padding: 4px 20px;
+  gap: 2px;
+}
+.slist-summary-label { font-size: 10px; color: #999; text-transform: uppercase; letter-spacing: 0.05em; }
+.slist-summary-val { font-size: 18px; font-weight: 600; color: #1a1a1a; }
+.slist-summary-divider { width: 1px; height: 36px; background: #e0ddd5; margin: 0 8px; }
+
+.slist-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: 'Helvetica Neue', Arial, sans-serif;
+  font-size: 11px;
+}
+.slist-table thead th {
+  position: sticky; top: 0; z-index: 10;
+  background: #fafaf8;
+  border-bottom: 1px solid #e0ddd5;
+  padding: 6px 10px;
+  text-align: left;
+  font-weight: 500;
+  color: #666;
+  white-space: nowrap;
+}
+.slist-th-num { text-align: right !important; }
+.slist-th-period { text-align: center !important; min-width: 90px; }
+
+.slist-dept-row td {
+  background: #f5f4f0;
+  padding: 4px 10px;
+  font-size: 10px;
+  font-weight: 600;
+  color: #999;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  border-top: 1px solid #e0ddd5;
+}
+
+.slist-row { border-bottom: 1px solid #f0ede8; }
+.slist-row:hover { background: #fafaf8; }
+
+.slist-td-teacher {
+  padding: 6px 10px;
+  font-weight: 500;
+  white-space: nowrap;
+  min-width: 140px;
+}
+.slist-td-dept {
+  padding: 6px 10px;
+  color: #999;
+  font-size: 10px;
+  white-space: nowrap;
+}
+.slist-td-period {
+  padding: 5px 8px;
+  vertical-align: top;
+  border-left: 1px solid #f0ede8;
+}
+.slist-td-period.slist-conf { color: #aaa; font-style: italic; }
+.slist-td-period.slist-empty { color: #ddd; text-align: center; }
+.slist-course-name { font-size: 11px; color: #1a1a1a; line-height: 1.3; }
+.slist-course-counts { font-size: 10px; color: #999; margin-top: 1px; }
+.slist-grade-label { font-size: 8px; color: #bbb; vertical-align: super; margin-right: 1px; }
+
+.slist-td-num {
+  padding: 6px 10px;
+  text-align: right;
+  color: #555;
+  white-space: nowrap;
+  border-left: 1px solid #f0ede8;
+}
+.slist-total { font-weight: 600; color: #1a1a1a; }
 
 /* ── Teacher Qualifications Table ────────────────────────────────────── */
 .qual-tag {
@@ -393,6 +626,88 @@ select.cell-input, select.cell-input-narrow {
   padding: 0 1px; display: flex; align-items: center;
 }
 .qual-tag-remove:hover { color: #9f1239; }
+
+/* ── Course Conflicts grouped card UI ──────────────────────────────────── */
+.conflict-group-card {
+  border: 1px solid #e8e4dc;
+  border-radius: 8px;
+  background: #fff;
+  overflow: visible;
+}
+.conflict-group-header {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 14px;
+  border-bottom: 1px solid #f0ede8;
+  background: #faf9f7;
+  border-radius: 8px 8px 0 0;
+}
+.conflict-group-name {
+  font-family: 'Helvetica Neue', Arial, sans-serif;
+  font-size: 12px; font-weight: 600; color: #1a1a1a;
+  cursor: pointer; padding: 2px 4px; border-radius: 3px;
+}
+.conflict-group-name:hover { background: #f0ede8; }
+.conflict-name-input {
+  font-family: 'Helvetica Neue', Arial, sans-serif;
+  font-size: 12px; font-weight: 600;
+  border: 1px solid #c0bdb6; border-radius: 4px;
+  padding: 2px 6px; outline: none; width: 200px;
+}
+.conflict-rule-select {
+  font-family: 'Helvetica Neue', Arial, sans-serif;
+  font-size: 11px; font-weight: 500; color: #444;
+  border: 1px solid #e0ddd5; border-radius: 5px;
+  padding: 3px 7px; background: #fafaf8; cursor: pointer;
+  outline: none;
+}
+.conflict-rule-select:focus { border-color: #a0a0c0; }
+.conflict-group-body {
+  padding: 10px 14px;
+  display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
+}
+.conflict-course-tag {
+  background: #f0f4ff; border-color: #c7d4f5; color: #3b5bdb;
+}
+
+/* ── Course Grouping ──────────────────────────────────────────────────────── */
+.cg-bracket {
+  width: 6px; padding: 0; background: transparent;
+}
+.cg-bracket-top {
+  background: linear-gradient(to bottom, transparent 50%, #6366f1 50%);
+  border-radius: 3px 0 0 0;
+  border-left: 2px solid #6366f1;
+  border-top: 2px solid #6366f1;
+}
+.cg-bracket-bottom {
+  background: linear-gradient(to top, transparent 50%, #6366f1 50%);
+  border-radius: 0 0 0 3px;
+  border-left: 2px solid #6366f1;
+  border-bottom: 2px solid #6366f1;
+}
+.cg-row.cg-primary td { background: #faf9ff; border-top: 1px solid #e0def8; }
+.cg-row.cg-secondary td { background: #faf9ff; border-bottom: 1px solid #e0def8; }
+.cg-shared-cell {
+  background: #f3f2fd !important;
+  border-left: 1px solid #e0def8;
+  vertical-align: middle;
+}
+/* Group action buttons */
+.cg-action-btn {
+  background: none; border: 1px solid #e0e0e0; border-radius: 4px;
+  cursor: pointer; font-size: 12px; color: #888;
+  padding: 2px 5px; line-height: 1;
+}
+.cg-action-btn:hover { border-color: #aaa; color: #333; background: #f5f5f5; }
+.cg-link-btn { color: #6366f1; border-color: #c7d4f5; }
+.cg-link-btn:hover { background: #f0f4ff; color: #4338ca; }
+.cg-unlink-btn:hover { color: #b91c1c; border-color: #fca5a5; background: #fff1f2; }
+
+/* Read-only "assigned to" tags — muted, no remove button */
+.qual-tag-assigned {
+  background: #f5f5f4; border-color: #d6d3d1; color: #78716c;
+  padding: 2px 7px;
+}
 
 .qual-add-btn {
   font-family: 'Helvetica Neue', Arial, sans-serif;
@@ -463,6 +778,20 @@ select.cell-input, select.cell-input-narrow {
 .pill-HEALTH           { background: #f0fdfa; border-color: #99f6e4; color: #134e4a; }
 .pill-WORLD_LANGUAGE   { background: #ecfeff; border-color: #a5f3fc; color: #164e63; }
 .pill-ELD              { background: #eef2ff; border-color: #c7d2fe; color: #3730a3; }
+
+/* Department label tags (reuse pill colors) */
+.dept-tag { font-size: 9px; border-radius: 3px; padding: 0 5px; white-space: nowrap; font-family: 'Helvetica Neue', Arial, sans-serif; }
+.dept-tag-MATH             { background: #eff6ff; color: #1e40af; }
+.dept-tag-SCIENCE          { background: #f0fdf4; color: #166534; }
+.dept-tag-ENGLISH          { background: #fdf4ff; color: #6b21a8; }
+.dept-tag-SOCIAL_SCIENCE   { background: #fffbeb; color: #92400e; }
+.dept-tag-PE_HEALTH        { background: #ecfdf5; color: #065f46; }
+.dept-tag-SWD_MILD_MOD     { background: #fff1f2; color: #9f1239; }
+.dept-tag-SWD_MOD_SEV      { background: #fff1f2; color: #9f1239; }
+.dept-tag-CTE              { background: #fff7ed; color: #9a3412; }
+.dept-tag-VAPA             { background: #fdf2f8; color: #86198f; }
+.dept-tag-WORLD_LANGUAGE   { background: #ecfeff; color: #164e63; }
+.dept-tag-RELEASES         { background: #f9f8f3; color: #aaa; }
 
 /* ── Inspector ───────────────────────────────────────────────────────── */
 .inspector-panel {

@@ -1,3 +1,4 @@
+import { useRef, useState } from "react";
 import type { Section } from "../api";
 
 interface Teacher {
@@ -13,32 +14,42 @@ interface Props {
   onSelectTeacher: (teacher: Teacher) => void;
   selectedTeacherId?: string;
   fixedKeys?: Set<string>;
+  gridLockedKeys?: Set<string>;
   coteachKeys?: Set<string>;
   courseNames?: Map<string, string>;
   courseEnrollment?: Map<string, { enrollment_7th: number; enrollment_8th: number }>;
   /** Total unique students per grade (not course-enrollment sums) */
   totalStudents?: { grade7: number; grade8: number };
+  onToggleLock?: (teacher_id: string, course_id: string, period: number) => void;
+  onSwap?: (teacher_id: string, course_a: string, period_a: number, course_b: string, period_b: number) => void;
+  coteachPairs?: Map<string, { partnerTeacher: string; partnerCourse: string }>;
 }
 
 const PERIODS = [1, 2, 3, 4, 5, 6, 7];
+const NON_INSTR = new Set(["CONFERENCE", "PROGRESS", "PROGRESSMON", "TITLE1", "COMMUNITY", "COMSCHOOLS", "5CS", "ASB", "ASBRELEASE", "REWARDS", "DLI"]);
 
 function pillClass(dept: string, isConf: boolean): string {
   if (isConf) return "course-pill pill-conf";
-  const key = dept.replace(/ /g, "_");
+  // Normalize: spaces → _, slashes → _, then map known variants
+  const raw = dept.replace(/[ /]/g, "_").toUpperCase();
+  const keyMap: Record<string, string> = {
+    "PE_HEALTH": "PE",
+    "PE": "PE",
+    "SWD_MILD_MOD": "SPED",
+    "SWD_MOD_SEV": "SPED",
+    "SPED": "SPED",
+    "SOCIAL_SCIENCE": "SOCIAL_SCIENCE",
+    "WORLD_LANGUAGE": "WORLD_LANGUAGE",
+  };
+  const key = keyMap[raw] ?? raw;
   return `course-pill pill-${key}`;
 }
 
 function deptAbbrev(dept: string): string {
   const map: Record<string, string> = {
-    "ENGLISH": "ENG",
-    "MATH": "MATH",
-    "SCIENCE": "SCI",
-    "SOCIAL SCIENCE": "SOC",
-    "CTE": "CTE",
-    "PE/HEALTH": "PE",
-    "VAPA": "VAPA",
-    "WORLD LANGUAGE": "LANG",
-    "SPED": "SPED",
+    "ENGLISH": "ENG", "MATH": "MATH", "SCIENCE": "SCI", "SOCIAL SCIENCE": "SOC",
+    "CTE": "CTE", "PE/HEALTH": "PE", "VAPA": "VAPA", "WORLD LANGUAGE": "LANG",
+    "SPED": "SPED", "SWD_MILD_MOD": "SWD", "SWD_MOD_SEV": "SWD",
   };
   return map[dept] ?? dept.slice(0, 4);
 }
@@ -48,7 +59,12 @@ function courseLabel(courseId: string, courseNames?: Map<string, string>): strin
   return courseNames.get(courseId) ?? courseId;
 }
 
-export default function ScheduleGrid({ sections, teachers, onSelectTeacher, selectedTeacherId, fixedKeys, coteachKeys, courseNames, courseEnrollment, totalStudents }: Props) {
+function sign(n: number) { return n > 0 ? "+" : ""; }
+function netCls(n: number) { return n > 0 ? "summary-pos" : n < 0 ? "summary-neg" : ""; }
+
+export default function ScheduleGrid({ sections, teachers, onSelectTeacher, selectedTeacherId, fixedKeys, gridLockedKeys, coteachKeys, courseNames, totalStudents, onToggleLock, onSwap, coteachPairs }: Props) {
+  const dragSrc = useRef<{ teacher_id: string; course_id: string; period: number } | null>(null);
+  const [dragOverKey, setDragOverKey] = useState<string | null>(null);
   // lookup: teacher_id → period → Section
   const lookup = new Map<string, Map<number, Section>>();
   for (const s of sections) {
@@ -65,10 +81,7 @@ export default function ScheduleGrid({ sections, teachers, onSelectTeacher, sele
   }
   const depts = [...byDept.keys()].sort();
 
-  // Non-instructional courses don't count toward student seats
-  const NON_INSTR = new Set(["CONFERENCE", "PROGRESS", "PROGRESSMON", "TITLE1", "COMMUNITY", "COMSCHOOLS", "5CS", "ASB", "ASBRELEASE", "REWARDS", "DLI"]);
-
-  // Per-period seat totals (from solver output sections)
+  // Per-period seat totals
   const periodSeats7 = new Map<number, number>();
   const periodSeats8 = new Map<number, number>();
   for (const s of sections) {
@@ -77,140 +90,261 @@ export default function ScheduleGrid({ sections, teachers, onSelectTeacher, sele
     periodSeats8.set(s.period, (periodSeats8.get(s.period) ?? 0) + (s.students_8th ?? 0));
   }
 
-  // Total unique students per grade (every student is in class every period)
-  const totalEnrollment7 = totalStudents?.grade7 ?? 0;
-  const totalEnrollment8 = totalStudents?.grade8 ?? 0;
+  const enroll7 = totalStudents?.grade7 ?? 0;
+  const enroll8 = totalStudents?.grade8 ?? 0;
+
+  // Hero totals: sum across all periods
+  const totalSeats7 = PERIODS.reduce((n, p) => n + (periodSeats7.get(p) ?? 0), 0);
+  const totalSeats8 = PERIODS.reduce((n, p) => n + (periodSeats8.get(p) ?? 0), 0);
+  // Compare total seats to enrollment * 7 (each student needs a seat every period)
+  const neededTotal7 = enroll7 * PERIODS.length;
+  const neededTotal8 = enroll8 * PERIODS.length;
+  const netTotal7 = totalSeats7 - neededTotal7;
+  const netTotal8 = totalSeats8 - neededTotal8;
+
+  // Averages per period
+  const n = PERIODS.length;
+  const avgSeats7 = Math.round(totalSeats7 / n);
+  const avgSeats8 = Math.round(totalSeats8 / n);
+  const netAvg7 = avgSeats7 - enroll7;
+  const netAvg8 = avgSeats8 - enroll8;
+
+  const showSummary = sections.length > 0 && !!totalStudents;
+  // Total columns: Teacher + 7 periods + Sections + 7th + 8th + Total = 12
+  const TOTAL_COLS = 1 + PERIODS.length + 4;
 
   return (
-    <div style={{ overflow: "auto", height: "100%" }}>
-      <table className="schedule-table">
-        <thead>
-          <tr>
-            <th style={{ textAlign: "left" }}>Teacher</th>
-            {PERIODS.map(p => <th key={p}>P{p}</th>)}
-          </tr>
-        </thead>
-        <tbody>
-          {depts.map(dept => (
-            <>
-              <tr key={`dept-${dept}`} className="dept-row">
-                <td colSpan={8}>{dept}</td>
-              </tr>
-              {byDept.get(dept)!.map(teacher => {
-                const periodMap = lookup.get(teacher.teacher_id);
-                const isSelected = teacher.teacher_id === selectedTeacherId;
-                return (
-                  <tr
-                    key={teacher.teacher_id}
-                    className={isSelected ? "selected" : ""}
-                    onClick={() => onSelectTeacher(teacher)}
-                  >
-                    <td>
-                      <span style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-                        <span>{teacher.full_name || teacher.teacher_id}</span>
-                        <span className="dept-badge">{deptAbbrev(teacher.department)}</span>
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
+
+      {/* ── Schedule grid (summary rows inline at top for column alignment) ── */}
+      <div style={{ flex: 1, overflow: "auto" }}>
+        <table className="schedule-table">
+          <thead>
+            <tr>
+              <th />
+              {PERIODS.map(p => <th key={p}>P{p}</th>)}
+              <th colSpan={4} style={{ background: "transparent", border: "none" }} />
+            </tr>
+          </thead>
+
+          {/* Summary rows — inside the table so period columns align exactly */}
+          {showSummary && (
+            <tbody className="summary-tbody">
+              {/* Seats */}
+              <tr className="sum-row">
+                <td className="sum-label">Seats</td>
+                {PERIODS.map(p => {
+                  const s7 = periodSeats7.get(p) ?? 0;
+                  const s8 = periodSeats8.get(p) ?? 0;
+                  return (
+                    <td key={p} className="sum-cell">
+                      <span className="tfoot-trio">
+                        <span className="tfoot-sub"><span className="tfoot-g">7</span>{s7}</span>
+                        <span className="tfoot-sep">·</span>
+                        <span className="tfoot-sub"><span className="tfoot-g">8</span>{s8}</span>
+                        <span className="tfoot-sep">·</span>
+                        <span className="tfoot-total">{s7 + s8}</span>
                       </span>
                     </td>
-                    {PERIODS.map(p => {
-                      const sec = periodMap?.get(p);
-                      if (!sec) {
-                        return <td key={p} className="period-cell"><span className="pill-empty">—</span></td>;
-                      }
-                      const isConf = sec.course_id === "CONFERENCE";
-                      const isFixed = fixedKeys?.has(`${sec.teacher_id}|${sec.course_id}|${sec.period}`);
-                      const isCoteach = coteachKeys?.has(`${sec.teacher_id}|${sec.course_id}`);
-                      return (
-                        <td key={p} className="period-cell">
-                          <span className="period-cell-inner">
-                            <span className={pillClass(teacher.department, isConf)}>
-                              {isConf ? "Conference" : courseLabel(sec.course_id, courseNames)}
-                            </span>
-                            {!isConf && sec.total_students != null && sec.total_students > 0 && (
-                              <span className="pill-students">
-                                {sec.students_7th && sec.students_8th
-                                  ? `${sec.students_7th} · ${sec.students_8th}`
-                                  : `${sec.total_students}`}
-                              </span>
-                            )}
-                            {(isFixed || isCoteach) && (
-                              <span className="pill-icons">
-                                {isFixed && <LockIcon />}
-                                {isCoteach && <CoteachIcon />}
-                              </span>
-                            )}
+                  );
+                })}
+                {/* Stacked aggregate — rowspan covers all 3 summary rows */}
+                <td className="sum-agg" colSpan={4} rowSpan={3}>
+                  {[
+                    { label: "Avg Seats / Period", vals: [
+                      { g: "7", v: avgSeats7 }, { g: "8", v: avgSeats8 },
+                      { g: "", v: avgSeats7 + avgSeats8, bold: true },
+                    ]},
+                    { label: "Enrollment", vals: [
+                      { g: "7", v: enroll7 }, { g: "8", v: enroll8 },
+                      { g: "", v: enroll7 + enroll8, bold: true },
+                    ]},
+                    { label: "Net / Period", vals: [
+                      { g: "7", v: netAvg7, net: true }, { g: "8", v: netAvg8, net: true },
+                      { g: "", v: netAvg7 + netAvg8, net: true, bold: true },
+                    ]},
+                  ].map(row => (
+                    <div key={row.label} className="sum-agg-block">
+                      <div className="sum-agg-label">{row.label}</div>
+                      <div className="sum-agg-vals">
+                        {row.vals.map((v, i) => (
+                          <span key={i} className={`sum-agg-val${v.bold ? " sum-agg-bold" : ""}${v.net ? ` ${netCls(v.v)}` : ""}`}>
+                            {v.g && <span className="tfoot-g">{v.g}</span>}
+                            {v.net && v.v !== 0 ? sign(v.v) : ""}{v.v}
                           </span>
-                        </td>
-                      );
-                    })}
-                  </tr>
-                );
-              })}
-            </>
-          ))}
-        </tbody>
-        {sections.length > 0 && totalStudents && (
-          <tfoot className="schedule-summary">
-            <tr className="summary-label-row">
-              <td colSpan={8} />
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </td>
+              </tr>
+              {/* Enrollment */}
+              <tr className="sum-row">
+                <td className="sum-label">Enrollment</td>
+                {PERIODS.map(p => (
+                  <td key={p} className="sum-cell">
+                    <span className="tfoot-trio">
+                      <span className="tfoot-sub"><span className="tfoot-g">7</span>{enroll7}</span>
+                      <span className="tfoot-sep">·</span>
+                      <span className="tfoot-sub"><span className="tfoot-g">8</span>{enroll8}</span>
+                      <span className="tfoot-sep">·</span>
+                      <span className="tfoot-total">{enroll7 + enroll8}</span>
+                    </span>
+                  </td>
+                ))}
+              </tr>
+              {/* Net */}
+              <tr className="sum-row">
+                <td className="sum-label">Net</td>
+                {PERIODS.map(p => {
+                  const d7 = (periodSeats7.get(p) ?? 0) - enroll7;
+                  const d8 = (periodSeats8.get(p) ?? 0) - enroll8;
+                  return (
+                    <td key={p} className="sum-cell">
+                      <span className="tfoot-trio">
+                        <span className={netCls(d7)}><span className="tfoot-g">7</span>{sign(d7)}{d7}</span>
+                        <span className="tfoot-sep">·</span>
+                        <span className={netCls(d8)}><span className="tfoot-g">8</span>{sign(d8)}{d8}</span>
+                        <span className="tfoot-sep">·</span>
+                        <span className={`tfoot-total ${netCls(d7 + d8)}`}>{sign(d7 + d8)}{d7 + d8}</span>
+                      </span>
+                    </td>
+                  );
+                })}
+              </tr>
+            </tbody>
+          )}
+
+          <tbody>
+            {/* Sub-header row: stat column labels aligned with grid */}
+            <tr className="grid-subheader">
+              <th style={{ textAlign: "left" }}>Teacher</th>
+              {PERIODS.map(p => <th key={p}>P{p}</th>)}
+              <th className="teacher-stat-th">Sect</th>
+              <th className="teacher-stat-th">7th</th>
+              <th className="teacher-stat-th">8th</th>
+              <th className="teacher-stat-th">Total</th>
             </tr>
-            <tr className="summary-row">
-              <td className="summary-label">Seats (7th)</td>
-              {PERIODS.map(p => <td key={p} className="summary-cell">{periodSeats7.get(p) ?? 0}</td>)}
-            </tr>
-            <tr className="summary-row">
-              <td className="summary-label">Seats (8th)</td>
-              {PERIODS.map(p => <td key={p} className="summary-cell">{periodSeats8.get(p) ?? 0}</td>)}
-            </tr>
-            <tr className="summary-row summary-row-bold">
-              <td className="summary-label">Seats (total)</td>
-              {PERIODS.map(p => <td key={p} className="summary-cell">{(periodSeats7.get(p) ?? 0) + (periodSeats8.get(p) ?? 0)}</td>)}
-            </tr>
-            <tr className="summary-spacer"><td colSpan={8} /></tr>
-            <tr className="summary-row">
-              <td className="summary-label">Enrollment (7th)</td>
-              {PERIODS.map(p => <td key={p} className="summary-cell">{totalEnrollment7}</td>)}
-            </tr>
-            <tr className="summary-row">
-              <td className="summary-label">Enrollment (8th)</td>
-              {PERIODS.map(p => <td key={p} className="summary-cell">{totalEnrollment8}</td>)}
-            </tr>
-            <tr className="summary-row summary-row-bold">
-              <td className="summary-label">Enrollment (total)</td>
-              {PERIODS.map(p => <td key={p} className="summary-cell">{totalEnrollment7 + totalEnrollment8}</td>)}
-            </tr>
-            <tr className="summary-spacer"><td colSpan={8} /></tr>
-            <tr className="summary-row">
-              <td className="summary-label">Net (7th)</td>
-              {PERIODS.map(p => {
-                const diff = (periodSeats7.get(p) ?? 0) - totalEnrollment7;
-                return <td key={p} className={`summary-cell ${diff > 0 ? "summary-pos" : diff < 0 ? "summary-neg" : ""}`}>{diff > 0 ? "+" : ""}{diff}</td>;
-              })}
-            </tr>
-            <tr className="summary-row">
-              <td className="summary-label">Net (8th)</td>
-              {PERIODS.map(p => {
-                const diff = (periodSeats8.get(p) ?? 0) - totalEnrollment8;
-                return <td key={p} className={`summary-cell ${diff > 0 ? "summary-pos" : diff < 0 ? "summary-neg" : ""}`}>{diff > 0 ? "+" : ""}{diff}</td>;
-              })}
-            </tr>
-            <tr className="summary-row summary-row-bold">
-              <td className="summary-label">Net (total)</td>
-              {PERIODS.map(p => {
-                const diff = (periodSeats7.get(p) ?? 0) + (periodSeats8.get(p) ?? 0) - totalEnrollment7 - totalEnrollment8;
-                return <td key={p} className={`summary-cell ${diff > 0 ? "summary-pos" : diff < 0 ? "summary-neg" : ""}`}>{diff > 0 ? "+" : ""}{diff}</td>;
-              })}
-            </tr>
-          </tfoot>
-        )}
-      </table>
+            {depts.map(dept => (
+              <>
+                <tr key={`dept-${dept}`} className="dept-row">
+                  <td colSpan={TOTAL_COLS}>{dept}</td>
+                </tr>
+                {byDept.get(dept)!.map(teacher => {
+                  const periodMap = lookup.get(teacher.teacher_id);
+                  const isSelected = teacher.teacher_id === selectedTeacherId;
+                  const instructional = sections.filter(
+                    s => s.teacher_id === teacher.teacher_id && !NON_INSTR.has(s.course_id)
+                  );
+                  const tSeats7 = instructional.reduce((n, s) => n + (s.students_7th ?? 0), 0);
+                  const tSeats8 = instructional.reduce((n, s) => n + (s.students_8th ?? 0), 0);
+
+                  return (
+                    <tr
+                      key={teacher.teacher_id}
+                      className={isSelected ? "selected" : ""}
+                      onClick={() => onSelectTeacher(teacher)}
+                    >
+                      <td>
+                        <span style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                          <span>{teacher.full_name || teacher.teacher_id}</span>
+                        </span>
+                      </td>
+                      {PERIODS.map(p => {
+                        const sec = periodMap?.get(p);
+                        if (!sec) {
+                          return <td key={p} className="period-cell"><span className="pill-empty">—</span></td>;
+                        }
+                        const isConf = sec.course_id === "CONFERENCE";
+                        const key = `${sec.teacher_id}|${sec.course_id}|${sec.period}`;
+                        const isDataLocked = fixedKeys?.has(key) && !gridLockedKeys?.has(key);
+                        const isGridLocked = gridLockedKeys?.has(key);
+                        const isCoteach = coteachKeys?.has(`${sec.teacher_id}|${sec.course_id}|${sec.period}`);
+                        const isLockable = !!onToggleLock && !isDataLocked;
+                        const dragKey = `${teacher.teacher_id}|${p}`;
+                        const isDragOver = dragOverKey === dragKey;
+                        return (
+                          <td
+                            key={p}
+                            className={`period-cell${isGridLocked ? " grid-locked" : ""}${isLockable ? " lockable" : ""}${isDragOver ? " drag-over" : ""}`}
+                            onClick={isLockable ? (e) => { e.stopPropagation(); onToggleLock(sec.teacher_id, sec.course_id, sec.period); } : undefined}
+                            title={isDataLocked ? "Locked in data table" : isGridLocked ? "Click to unlock" : isCoteach ? "Co-taught — drags with partner" : isLockable ? "Click to lock" : undefined}
+                            draggable={!!onSwap}
+                            onDragStart={onSwap ? (e) => {
+                              dragSrc.current = { teacher_id: teacher.teacher_id, course_id: sec.course_id, period: p };
+                              e.dataTransfer.effectAllowed = "move";
+                            } : undefined}
+                            onDragOver={onSwap ? (e) => {
+                              if (dragSrc.current && dragSrc.current.teacher_id === teacher.teacher_id && dragSrc.current.period !== p) {
+                                e.preventDefault();
+                                e.dataTransfer.dropEffect = "move";
+                                setDragOverKey(dragKey);
+                              }
+                            } : undefined}
+                            onDragLeave={onSwap ? () => setDragOverKey(null) : undefined}
+                            onDragEnd={onSwap ? () => { dragSrc.current = null; setDragOverKey(null); } : undefined}
+                            onDrop={onSwap ? (e) => {
+                              e.preventDefault();
+                              setDragOverKey(null);
+                              const src = dragSrc.current;
+                              if (src && src.teacher_id === teacher.teacher_id && src.period !== p) {
+                                onSwap(teacher.teacher_id, src.course_id, src.period, sec.course_id, p);
+                              }
+                              dragSrc.current = null;
+                            } : undefined}
+                          >
+                            <span className="period-cell-inner">
+                              {(isDataLocked || isGridLocked || isCoteach) && (
+                                <span className="pill-icons">
+                                  {isDataLocked && <LockIcon className="pill-icon-data" />}
+                                  {isGridLocked && <GridLockIcon />}
+                                  {isCoteach && <CoteachIcon />}
+                                </span>
+                              )}
+                              <span className={pillClass(teacher.department, isConf)}>
+                                {isConf ? "Conference" : courseLabel(sec.course_id, courseNames)}
+                              </span>
+                              {!isConf && sec.total_students != null && sec.total_students > 0 && (
+                                <span className="pill-students">
+                                  {sec.students_7th != null && sec.students_8th != null
+                                    ? <><span className="pill-grade-label">7</span>{sec.students_7th}<span className="pill-grade-sep"> · </span><span className="pill-grade-label">8</span>{sec.students_8th}</>
+                                    : `${sec.total_students}`}
+                                </span>
+                              )}
+                            </span>
+                          </td>
+                        );
+                      })}
+                      {/* Per-teacher stats */}
+                      <td className="teacher-stat-cell">{instructional.length || "—"}</td>
+                      <td className="teacher-stat-cell">{tSeats7 || "—"}</td>
+                      <td className="teacher-stat-cell">{tSeats8 || "—"}</td>
+                      <td className="teacher-stat-cell teacher-stat-total">{(tSeats7 + tSeats8) || "—"}</td>
+                    </tr>
+                  );
+                })}
+              </>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
 
-function LockIcon() {
+function LockIcon({ className = "pill-icon" }: { className?: string }) {
   return (
-    <svg className="pill-icon" width="9" height="9" viewBox="0 0 24 24" fill="currentColor">
+    <svg className={className} width="9" height="9" viewBox="0 0 24 24" fill="currentColor">
       <path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zM12 3c1.66 0 3 1.34 3 3v2H9V6c0-1.66 1.34-3 3-3zm6 17H6V10h12v10zm-6-3c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2z"/>
+    </svg>
+  );
+}
+
+/** Open padlock icon — used for grid locks (unlockable) */
+function GridLockIcon() {
+  return (
+    <svg className="pill-icon-grid" width="9" height="9" viewBox="0 0 24 24" fill="currentColor">
+      <path d="M12 1C9.24 1 7 3.24 7 6v1H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V9c0-1.1-.9-2-2-2h-1V6c0-2.76-2.24-5-5-5zm0 2c1.66 0 3 1.34 3 3v1H9V6c0-1.66 1.34-3 3-3zm0 9c1.1 0 2 .9 2 2s-.9 2-2 2-2-.9-2-2 .9-2 2-2z"/>
     </svg>
   );
 }

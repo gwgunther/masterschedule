@@ -145,6 +145,7 @@ export default function App() {
               >
                 Schedule Grid
               </button>
+
               {hasDiagnostics && (
                 <button
                   className={`sidebar-nav-item${activeScheduleTab === "diagnostics" ? " active" : ""}`}

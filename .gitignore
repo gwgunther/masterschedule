@@ -28,5 +28,5 @@ Thumbs.db
 data/raw/*.xlsx
 _references/
 
-# Solver runs output
-data/projects/*/runs/
+# Project data (local only — not shared via git)
+data/projects/

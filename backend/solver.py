@@ -45,29 +45,32 @@ def _load_data(data_dir: Path) -> dict:
 
     for col in ("enrollment_7th", "enrollment_8th", "total_enrollment", "num_sections"):
         df_courses[col] = pd.to_numeric(df_courses[col], errors="coerce").fillna(0).astype(int)
-    df_teachers["max_sections"] = pd.to_numeric(df_teachers["max_sections"], errors="coerce").fillna(0).astype(int)
 
     teachers = df_teachers["teacher_id"].tolist()
     courses = df_courses["course_id"].tolist()
     periods = list(range(1, 8))
 
     enrollment = df_courses.set_index("course_id").to_dict()
-    teacher_max = df_teachers.set_index("teacher_id")["max_sections"].to_dict()
     non_instr = {c for c in courses if c in NON_INSTRUCTIONAL}
 
+    # teacher_qualifications: reference/display only — no longer a solver constraint.
+    # Still loaded so diagnostics can show which teachers could teach a course.
     qualifications: dict[str, set] = {}
     for _, row in df_quals.iterrows():
-        qualifications.setdefault(row["teacher_id"], set()).add(row["course_id"])
-    for t in teachers:
-        qualifications.setdefault(t, set()).add("CONFERENCE")
-    for _, row in df_constraints.iterrows():
-        cid, tid = str(row["course_id"]), str(row["teacher_id"])
-        if tid in qualifications:
-            qualifications[tid].add(cid)
+        qualifications.setdefault(str(row["teacher_id"]), set()).add(str(row["course_id"]))
 
     section_locks: dict[tuple, int] = {}
     for _, row in df_locks.iterrows():
         section_locks[(row["teacher_id"], row["course_id"])] = int(row["num_sections"])
+
+    # Derive teacher_max from section_locks (sum of all non-CONFERENCE quotas per teacher).
+    # This replaces the manually-maintained max_sections column in teachers.csv.
+    teacher_max: dict[str, int] = {}
+    for t in teachers:
+        teacher_max[t] = sum(
+            n for (lt, lc), n in section_locks.items()
+            if lt == t and lc != "CONFERENCE"
+        )
 
     forced = set()
     for _, row in df_constraints.iterrows():
@@ -89,7 +92,8 @@ def _load_data(data_dir: Path) -> dict:
                       str(row["course_b"]), str(row["teacher_b"])))
 
     # Course conflict groups from course_conflicts table
-    conflict_groups_hard: dict[str, list[str]] = {}
+    # Hard groups store {name: {"courses": [...], "max_per_period": int}}
+    conflict_groups_hard: dict[str, dict] = {}
     conflict_groups_soft: dict[str, list[str]] = {}
     course_set = set(courses)
     for _, row in df_conflicts.iterrows():
@@ -98,8 +102,18 @@ def _load_data(data_dir: Path) -> dict:
         ctype = str(row.get("constraint_type", "hard")).lower()
         if cid not in course_set:
             continue
-        target = conflict_groups_hard if ctype == "hard" else conflict_groups_soft
-        target.setdefault(grp, []).append(cid)
+        if ctype == "hard":
+            if grp not in conflict_groups_hard:
+                mpp = int(row.get("max_per_period") or 0) or 1
+                conflict_groups_hard[grp] = {"courses": [], "max_per_period": mpp}
+            if cid not in conflict_groups_hard[grp]["courses"]:
+                conflict_groups_hard[grp]["courses"].append(cid)
+            # Update max_per_period if a later row has a value (should be consistent)
+            mpp_row = int(row.get("max_per_period") or 0)
+            if mpp_row > 0:
+                conflict_groups_hard[grp]["max_per_period"] = mpp_row
+        else:
+            conflict_groups_soft.setdefault(grp, []).append(cid)
 
     track_courses = {
         "honors_7": [c for c in courses if c.startswith("EN701") or c.startswith("MA701") or c.startswith("SC701") or c.startswith("SS701")],
@@ -142,7 +156,6 @@ def _build_problem(data: dict, elastic: bool = False):
     enrollment = data["enrollment"]
     teacher_max = data["teacher_max"]
     non_instr = data["non_instr"]
-    qualifications = data["qualifications"]
     section_locks = data["section_locks"]
     forced = data["forced"]
     coteach_list = data["coteach_list"]
@@ -196,8 +209,7 @@ def _build_problem(data: dict, elastic: bool = False):
     soft_max_v = pulp.LpVariable.dicts("soft_conf_max", soft_groups, lowBound=0, cat="Integer")
     soft_min_v = pulp.LpVariable.dicts("soft_conf_min", soft_groups, lowBound=0, cat="Integer")
 
-    # Grade-level enrollment balance variables — one deviation pair per period per grade
-    # Per-section enrollment: distribute course enrollment evenly across its sections
+    # Grade-level enrollment balance variables — deviation from even distribution per period
     per_sec_enroll_7 = {
         c: enrollment["enrollment_7th"].get(c, 0) / max(1, enrollment["num_sections"].get(c, 0))
         for c in courses
@@ -206,14 +218,8 @@ def _build_problem(data: dict, elastic: bool = False):
         c: enrollment["enrollment_8th"].get(c, 0) / max(1, enrollment["num_sections"].get(c, 0))
         for c in courses
     }
-    total_seats_7 = sum(
-        enrollment["enrollment_7th"].get(c, 0)
-        for c in courses if c not in non_instr
-    )
-    total_seats_8 = sum(
-        enrollment["enrollment_8th"].get(c, 0)
-        for c in courses if c not in non_instr
-    )
+    total_seats_7 = sum(enrollment["enrollment_7th"].get(c, 0) for c in courses if c not in non_instr)
+    total_seats_8 = sum(enrollment["enrollment_8th"].get(c, 0) for c in courses if c not in non_instr)
     target_7 = total_seats_7 / len(periods)
     target_8 = total_seats_8 / len(periods)
 
@@ -254,7 +260,7 @@ def _build_problem(data: dict, elastic: bool = False):
             prob += track_count[tr, p] <= track_max_v[tr], f"track_max_{tr}_{p}"
             prob += track_count[tr, p] >= track_min_v[tr], f"track_min_{tr}_{p}"
 
-    # Grade-level enrollment balance definitions — always included
+    # Grade-level enrollment balance definitions
     for p in periods:
         seats_7 = pulp.lpSum(
             x[t, c, p] * per_sec_enroll_7[c]
@@ -300,17 +306,9 @@ def _build_problem(data: dict, elastic: bool = False):
                 pulp.lpSum(x[t, c, p] for c in courses) <= 1
             ), f"one_per_period_{t}_{p}"
 
-    # 4. Teacher qualifications — always hard
-    #    CONFERENCE is skipped (all teachers auto-qualified via line above)
-    #    Non-instructional courses (5CS, TITLE1, etc.) DO require qualifications
-    for t in teachers:
-        for c in courses:
-            if c == "CONFERENCE":
-                continue
-            if c not in qualifications.get(t, set()):
-                prob += (
-                    pulp.lpSum(x[t, c, p] for p in periods) == 0
-                ), f"qual_{t}_{c}"
+    # 4. Teacher qualifications — removed. Section quotas (teacher_section_locks)
+    #    are the sole hard constraint on teacher↔course assignments.
+    #    teacher_qualifications is retained as reference/planning data only.
 
     # 5. Minimum sections per course
     for c in courses:
@@ -436,19 +434,21 @@ def _build_problem(data: dict, elastic: bool = False):
                     x[ta, ca, p] == x[tb, cb, p]
                 ), f"pair_{ca}_{ta}_{cb}_{tb}_{p}"
 
-    # 11. Course conflict groups — hard (at most 1 section from group per period)
-    for grp, clist in conflict_groups_hard.items():
+    # 11. Course conflict groups — hard (at most max_per_period sections from group per period)
+    for grp, info in conflict_groups_hard.items():
+        clist = info["courses"]
+        max_pp = info.get("max_per_period", 1)
         for p in periods:
             if elastic:
                 s = pulp.LpVariable(f"s_conflict_h_{grp}_{p}", lowBound=0, cat="Integer")
                 prob += (
-                    pulp.lpSum(x[t, c, p] for t in teachers for c in clist) + s <= 1
+                    pulp.lpSum(x[t, c, p] for t in teachers for c in clist) + s <= max_pp
                 ), f"conflict_hard_{grp}_{p}"
                 slacks["conflict_hard"][f"{grp}|P{p}"] = [s]
                 slack_penalty += PENALTY * s
             else:
                 prob += (
-                    pulp.lpSum(x[t, c, p] for t in teachers for c in clist) <= 1
+                    pulp.lpSum(x[t, c, p] for t in teachers for c in clist) <= max_pp
                 ), f"conflict_hard_{grp}_{p}"
 
     # 12. Course conflict groups — soft (spread sections across periods)
@@ -644,10 +644,12 @@ def _format_violation(group: str, label: str, slack_val: float, data: dict) -> d
     elif group == "conflict_hard":
         parts = label.split("|")
         grp, period = parts[0], parts[1]
-        conflict_courses = data.get("conflict_groups_hard", {}).get(grp, [])
+        grp_info = data.get("conflict_groups_hard", {}).get(grp, {})
+        conflict_courses = grp_info.get("courses", []) if isinstance(grp_info, dict) else grp_info
+        max_pp = grp_info.get("max_per_period", 1) if isinstance(grp_info, dict) else 1
         course_list = ", ".join(course_names.get(c, c) for c in conflict_courses)
-        detail["message"] = f"Conflict group \"{grp}\" — more than 1 section in {period}"
-        detail["context"] = f"Courses in group: {course_list}"
+        detail["message"] = f"Conflict group \"{grp}\" — more than {max_pp} section(s) in {period}"
+        detail["context"] = f"Courses in group: {course_list} (max {max_pp}/period)"
 
     else:
         detail["message"] = f"{label}: slack={slack_val}"
@@ -685,6 +687,7 @@ def run_solver(data_dir: Path | None = None, progress_cb=None,
         periods = data["periods"]
         enrollment = data["enrollment"]
         non_instr = data["non_instr"]
+        coteach_list = data["coteach_list"]
 
         _progress("building", f"Building model ({len(teachers)} teachers, {len(courses)} courses, 7 periods)...")
         prob, x, _ = _build_problem(data, elastic=False)
@@ -738,7 +741,7 @@ def run_solver(data_dir: Path | None = None, progress_cb=None,
                                     "teacher_id": t,
                                     "period": p,
                                 })
-                _annotate_students(best_sections, enrollment, non_instr)
+                _annotate_students(best_sections, enrollment, non_instr, coteach_list)
 
                 # Write best-attempt sections to run directory
                 if best_sections:
@@ -794,7 +797,7 @@ def run_solver(data_dir: Path | None = None, progress_cb=None,
                         })
 
         # Add student count estimates
-        _annotate_students(sections, enrollment, non_instr)
+        _annotate_students(sections, enrollment, non_instr, coteach_list)
 
         # Write output CSV to the run directory
         out_path = run_dir / "sections.csv"
@@ -829,20 +832,41 @@ def run_solver(data_dir: Path | None = None, progress_cb=None,
         }
 
 
-def _annotate_students(sections: list[dict], enrollment: dict, non_instr: set) -> None:
-    """Add total_students, students_7th, students_8th to each section (in-place)."""
+def _annotate_students(sections: list[dict], enrollment: dict, non_instr: set,
+                       coteach_list: list[dict] | None = None) -> None:
+    """Add total_students, students_7th, students_8th to each section (in-place).
+
+    For co-taught pairs the SWD students are a subset of the gen-ed enrollment.
+    We subtract them from the gen-ed course so they aren't double-counted:
+      gen-ed section students = (gened_enr - sped_enr) / gened_sections
+      sped section students   = sped_enr / sped_sections  (unchanged)
+    """
     from collections import defaultdict
     section_counts: dict[str, int] = defaultdict(int)
     for s in sections:
         if s["course_id"] not in non_instr and s["course_id"] != "CONFERENCE":
             section_counts[s["course_id"]] += 1
 
+    # Build lookup: gened_course_id → total SWD enrollment subtracted from it
+    sped_enr_by_gened: dict[str, tuple[int, int]] = {}  # gened_course → (swd_7, swd_8)
+    for info in (coteach_list or []):
+        gened_c = info["gened_course_code"]
+        sped_c  = info["swd_course_code"]
+        swd7 = enrollment["enrollment_7th"].get(sped_c, 0)
+        swd8 = enrollment["enrollment_8th"].get(sped_c, 0)
+        prev7, prev8 = sped_enr_by_gened.get(gened_c, (0, 0))
+        sped_enr_by_gened[gened_c] = (prev7 + swd7, prev8 + swd8)
+
     for s in sections:
         c = s["course_id"]
         n = section_counts.get(c, 1) or 1
-        total = enrollment["total_enrollment"].get(c, 0)
-        s7 = enrollment["enrollment_7th"].get(c, 0)
-        s8 = enrollment["enrollment_8th"].get(c, 0)
-        s["total_students"] = round(total / n)
-        s["students_7th"] = round(s7 / n)
-        s["students_8th"] = round(s8 / n)
+        total7 = enrollment["enrollment_7th"].get(c, 0)
+        total8 = enrollment["enrollment_8th"].get(c, 0)
+        # Subtract co-taught SWD students from gen-ed course count
+        if c in sped_enr_by_gened:
+            sub7, sub8 = sped_enr_by_gened[c]
+            total7 = max(0, total7 - sub7)
+            total8 = max(0, total8 - sub8)
+        s["students_7th"] = round(total7 / n)
+        s["students_8th"] = round(total8 / n)
+        s["total_students"] = s["students_7th"] + s["students_8th"]

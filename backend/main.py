@@ -212,12 +212,33 @@ async def import_csv(slug: str, sc: str, table: str, file: UploadFile = File(...
         raise HTTPException(status_code=400, detail=str(e))
 
 
+@app.post("/api/projects/{slug}/import-scenario")
+async def import_scenario_zip(slug: str, name: str, file: UploadFile = File(...)):
+    """Import a ZIP of CSVs as a new scenario."""
+    zip_bytes = await file.read()
+    try:
+        scenario = project_manager.import_scenario_zip(slug, name, zip_bytes)
+        return scenario
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 # ── Data endpoints (read/write — scoped to active context) ──────────────────
 
 @app.get("/api/data/{table}")
 def get_table(table: str):
     try:
-        return data_io.read_table(_db_path(), table, _scenario_id())
+        rows = data_io.read_table(_db_path(), table, _scenario_id())
+        # Derive num_sections from teacher_section_locks so it's never stale
+        if table == "courses":
+            locks = data_io.read_table(_db_path(), "teacher_section_locks", _scenario_id())
+            sums: dict[str, int] = {}
+            for r in locks:
+                cid = str(r.get("course_id", ""))
+                sums[cid] = sums.get(cid, 0) + int(r.get("num_sections") or 0)
+            for row in rows:
+                row["num_sections"] = sums.get(str(row.get("course_id", "")), 0)
+        return rows
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
@@ -253,7 +274,7 @@ def export_table(table: str):
 @app.get("/api/export")
 def export_all():
     from datetime import date
-    zip_bytes = data_io.export_all_zip(_db_path(), _scenario_id(), _runs_dir())
+    zip_bytes = data_io.export_all_zip(_db_path(), _scenario_id(), _runs_dir(), include_output=False)
     filename = f"master_schedule_{date.today().isoformat()}.zip"
     return Response(
         content=zip_bytes,
@@ -284,6 +305,101 @@ def delete_run(run_id: str):
         return {"ok": True}
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
+
+
+# ── Grid-lock endpoints ──────────────────────────────────────────────────────
+
+class GridLockRequest(BaseModel):
+    teacher_id: str
+    course_id: str
+    period: int
+
+
+def _fixed_keys_response(db_path, scenario_id):
+    """Return fixedKeys and gridLockedKeys arrays for the frontend."""
+    rows = data_io.read_table(db_path, "fixed_assignments", scenario_id)
+    fixed_keys = [f"{r['teacher_id']}|{r['course_id']}|{r['period']}" for r in rows]
+    grid_locked_keys = [
+        f"{r['teacher_id']}|{r['course_id']}|{r['period']}"
+        for r in rows if r.get("source") == "grid"
+    ]
+    return {"fixedKeys": fixed_keys, "gridLockedKeys": grid_locked_keys}
+
+
+@app.post("/api/grid-lock")
+def toggle_grid_lock(body: GridLockRequest):
+    db_path = _db_path()
+    scenario_id = _scenario_id()
+    rows = data_io.read_table(db_path, "fixed_assignments", scenario_id)
+
+    # Check if this cell is already grid-locked
+    existing_idx = next(
+        (i for i, r in enumerate(rows)
+         if r["teacher_id"] == body.teacher_id
+         and r["course_id"] == body.course_id
+         and int(r["period"]) == body.period
+         and r.get("source") == "grid"),
+        None
+    )
+
+    if existing_idx is not None:
+        # Unlock: remove the grid lock row
+        rows.pop(existing_idx)
+    else:
+        # Lock: add new row with source="grid"
+        rows.append({
+            "teacher_id": body.teacher_id,
+            "course_id": body.course_id,
+            "course_display": "",
+            "period": body.period,
+            "source": "grid",
+        })
+
+    data_io.write_table(db_path, "fixed_assignments", scenario_id, rows)
+    return _fixed_keys_response(db_path, scenario_id)
+
+
+class SwapGridLockRequest(BaseModel):
+    teacher_id: str
+    course_a: str
+    period_a: int
+    course_b: str
+    period_b: int
+
+
+@app.post("/api/grid-lock/swap")
+def swap_grid_lock(body: SwapGridLockRequest):
+    """Swap two period assignments for the same teacher and grid-lock both."""
+    db_path = _db_path()
+    scenario_id = _scenario_id()
+    rows = data_io.read_table(db_path, "fixed_assignments", scenario_id)
+
+    # Remove any existing fixed/grid rows for this teacher at these two periods
+    rows = [
+        r for r in rows
+        if not (
+            r["teacher_id"] == body.teacher_id
+            and int(r["period"]) in (body.period_a, body.period_b)
+        )
+    ]
+
+    # Add swapped grid-lock rows
+    rows.append({"teacher_id": body.teacher_id, "course_id": body.course_a, "period": body.period_b, "source": "grid"})
+    rows.append({"teacher_id": body.teacher_id, "course_id": body.course_b, "period": body.period_a, "source": "grid"})
+
+    data_io.write_table(db_path, "fixed_assignments", scenario_id, rows)
+    return _fixed_keys_response(db_path, scenario_id)
+
+
+@app.post("/api/grid-lock/clear")
+def clear_grid_locks():
+    db_path = _db_path()
+    scenario_id = _scenario_id()
+    rows = data_io.read_table(db_path, "fixed_assignments", scenario_id)
+    # Keep only non-grid rows
+    rows = [r for r in rows if r.get("source") != "grid"]
+    data_io.write_table(db_path, "fixed_assignments", scenario_id, rows)
+    return _fixed_keys_response(db_path, scenario_id)
 
 
 # ── Schedule endpoint (latest run) ───────────────────────────────────────────

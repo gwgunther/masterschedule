@@ -112,6 +112,37 @@ export async function saveTable(table: TableName, rows: Record<string, unknown>[
   if (!res.ok) throw new Error(await res.text());
 }
 
+export interface GridLockResponse {
+  fixedKeys: string[];
+  gridLockedKeys: string[];
+}
+
+export async function toggleGridLock(teacher_id: string, course_id: string, period: number): Promise<GridLockResponse> {
+  const res = await fetch(`${base}/grid-lock`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ teacher_id, course_id, period }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function swapGridLock(teacher_id: string, course_a: string, period_a: number, course_b: string, period_b: number): Promise<GridLockResponse> {
+  const res = await fetch(`${base}/grid-lock/swap`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ teacher_id, course_a, period_a, course_b, period_b }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function clearGridLocks(): Promise<GridLockResponse> {
+  const res = await fetch(`${base}/grid-lock/clear`, { method: "POST" });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
 export async function fetchSchedule(): Promise<{ exists: boolean; sections: Section[] }> {
   const res = await fetch(`${base}/schedule`);
   if (!res.ok) throw new Error(await res.text());
@@ -311,4 +342,19 @@ export async function importScenarioCsv(
     { method: "POST", body: formData },
   );
   if (!res.ok) throw new Error(await res.text());
+}
+
+export async function importScenarioZip(
+  projectSlug: string,
+  name: string,
+  file: File,
+): Promise<Scenario> {
+  const formData = new FormData();
+  formData.append("file", file);
+  const res = await fetch(
+    `${base}/projects/${projectSlug}/import-scenario?name=${encodeURIComponent(name)}`,
+    { method: "POST", body: formData },
+  );
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
 }

@@ -30,6 +30,10 @@ interface Props {
   groupByColumn?: string;
   /** Export callback for CSV download */
   onExport?: () => void;
+  /** Columns that can be sorted by clicking the header */
+  sortableColumns?: string[];
+  /** Columns that should flex to fill remaining space */
+  flexColumns?: string[];
 }
 
 function getNum(row: Record<string, unknown>, col: string): number {
@@ -41,19 +45,25 @@ function getNum(row: Record<string, unknown>, col: string): number {
 export default function EditableTable({
   table, columns, columnRefs = {}, computedColumns = [],
   searchable = false, refColumns = [], narrowColumns = [],
-  columnLabels = {}, groupByColumn, onExport,
+  columnLabels = {}, groupByColumn, onExport, sortableColumns = [], flexColumns = [],
 }: Props) {
   const [rows, setRows] = useState<Record<string, unknown>[]>([]);
+  const [lockMap, setLockMap] = useState<Map<string, { course_id: string; num_sections: number }[]>>(new Map());
+  // course_id → { display, code } for department labels
+  const [courseDeptMap, setCourseDeptMap] = useState<Map<string, { display: string; code: string }>>(new Map());
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [toast, setToast] = useState<{ type: "ok" | "err"; msg: string } | null>(null);
   const [search, setSearch] = useState("");
   const [confirmDelete, setConfirmDelete] = useState<number | null>(null);
+  const [sortCol, setSortCol] = useState<string | null>(null);
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
 
   const computedSet = new Set(computedColumns);
   const narrowSet = new Set(narrowColumns);
   const refSet = new Set(refColumns);
+  const flexSet = new Set(flexColumns);
   const savableColumns = columns.filter(c => !computedSet.has(c));
 
   const load = useCallback(async () => {
@@ -70,6 +80,58 @@ export default function EditableTable({
             }
           }
         }
+      }
+      if (table === "teachers") {
+        const [lockRows, courseRows, deptRows] = await Promise.all([
+          fetchTable("teacher_section_locks"),
+          fetchTable("courses"),
+          fetchTable("departments"),
+        ]);
+        const lm = new Map<string, { course_id: string; num_sections: number }[]>();
+        for (const r of lockRows as { teacher_id: string; course_id: string; num_sections: string }[]) {
+          if (!lm.has(r.teacher_id)) lm.set(r.teacher_id, []);
+          lm.get(r.teacher_id)!.push({ course_id: r.course_id, num_sections: Number(r.num_sections) || 0 });
+        }
+        setLockMap(lm);
+        // Build course→department map
+        const cdMap = new Map<string, { display: string; code: string }>();
+        const deptDisplayMap = new Map<string, string>();
+        for (const d of deptRows as { department_code: string; display_name: string }[]) {
+          deptDisplayMap.set(d.department_code, d.display_name);
+        }
+        for (const c of courseRows as { course_id: string; department?: string }[]) {
+          if (c.department) cdMap.set(c.course_id, { display: deptDisplayMap.get(c.department) || c.department, code: c.department });
+        }
+        setCourseDeptMap(cdMap);
+        // Compute max_sections and department from section quotas
+        for (const row of data) {
+          const tid = String(row.teacher_id ?? "");
+          const locks = lm.get(tid) ?? [];
+          row.max_sections = locks.reduce((sum, l) => sum + l.num_sections, 0);
+          // Store as JSON array of {display, code} for tag rendering
+          const deptSet = new Map<string, string>();
+          for (const l of locks) {
+            const d = cdMap.get(l.course_id);
+            if (d && !deptSet.has(d.code)) deptSet.set(d.code, d.display);
+          }
+          row._deptTags = JSON.stringify([...deptSet.entries()].map(([code, display]) => ({ code, display })));
+        }
+      }
+      // Load course→department map for tables with course ref columns
+      if (table !== "teachers" && refSet.has("course_id")) {
+        const [courseRows, deptRows] = await Promise.all([
+          fetchTable("courses"),
+          fetchTable("departments"),
+        ]);
+        const deptDisplayMap = new Map<string, string>();
+        for (const d of deptRows as { department_code: string; display_name: string }[]) {
+          deptDisplayMap.set(d.department_code, d.display_name);
+        }
+        const cdMap = new Map<string, { display: string; code: string }>();
+        for (const c of courseRows as { course_id: string; department?: string }[]) {
+          if (c.department) cdMap.set(c.course_id, { display: deptDisplayMap.get(c.department) || c.department, code: c.department });
+        }
+        setCourseDeptMap(cdMap);
       }
       setRows(data);
       setDirty(false);
@@ -127,6 +189,13 @@ export default function EditableTable({
   }
 
   function renderCell(row: Record<string, unknown>, rIdx: number, col: string) {
+    // Read-only computed columns (not "status" which has its own rich render below)
+    if (computedSet.has(col) && col !== "status" && col !== "assigned_to" && col !== "source" && !(col === "department" && table === "teachers")) {
+      const val = row[col];
+      const display = val != null && val !== "" ? String(val) : "—";
+      return <span style={{ color: "#888", fontSize: 12, fontFamily: "'Helvetica Neue', Arial, sans-serif" }}>{display}</span>;
+    }
+
     // Computed status column
     if (col === "status") {
       const enrollment = getNum(row, "total_enrollment");
@@ -158,6 +227,58 @@ export default function EditableTable({
       );
     }
 
+    // Assigned-to column — read-only tags from section quotas
+    if (col === "assigned_to") {
+      const key = String(table === "teachers" ? row.teacher_id : row.course_id ?? "");
+      const locks = lockMap.get(key) ?? [];
+      return (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 3, padding: "2px 0" }}>
+          {locks.map(({ course_id, num_sections }) => (
+            <span key={course_id} style={{
+              fontSize: 10, fontFamily: "'Helvetica Neue', Arial, sans-serif",
+              background: "#f0eee8", color: "#555", borderRadius: 4,
+              padding: "1px 6px", whiteSpace: "nowrap",
+            }}>
+              {course_id}
+              <span style={{ color: "#999", marginLeft: 2 }}>({num_sections})</span>
+            </span>
+          ))}
+        </div>
+      );
+    }
+
+    // Teacher department column — read-only colored tags
+    if (col === "department" && table === "teachers") {
+      const tagsJson = row._deptTags as string | undefined;
+      if (!tagsJson) return null;
+      const tags = JSON.parse(tagsJson) as { code: string; display: string }[];
+      return (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 3, padding: "2px 0" }}>
+          {tags.map(d => (
+            <span key={d.code} className={`dept-tag dept-tag-${d.code}`} style={{ padding: "1px 6px", borderRadius: 4, fontSize: 10 }}>
+              {d.display}
+            </span>
+          ))}
+        </div>
+      );
+    }
+
+    // Source column — read-only badge (only highlight grid-locked rows)
+    if (col === "source") {
+      const val = row[col] != null ? String(row[col]) : "";
+      if (val === "grid") {
+        return (
+          <span style={{
+            fontSize: 9, fontFamily: "'Helvetica Neue', Arial, sans-serif", fontWeight: 600,
+            letterSpacing: "0.04em", textTransform: "uppercase",
+            background: "#eff6ff", color: "#1d4ed8",
+            borderRadius: 3, padding: "1px 5px", whiteSpace: "nowrap",
+          }}>grid</span>
+        );
+      }
+      return null;
+    }
+
     // Notes column — textarea that wraps
     if (col === "notes") {
       const currentVal = row[col] != null ? String(row[col]) : "";
@@ -180,6 +301,7 @@ export default function EditableTable({
       // Ref column (teacher/course): overlay pattern — name prominent, ID as pill
       if (isRefCol) {
         const selectedOpt = options.find(o => o.value === currentVal);
+        const deptInfo = col === "course_id" ? courseDeptMap.get(currentVal) : undefined;
         return (
           <div className="ref-select-wrap">
             <div className="ref-select-display">
@@ -187,6 +309,7 @@ export default function EditableTable({
                 <>
                   <span className="ref-select-name">{selectedOpt.label}</span>
                   <span className="id-pill">{currentVal}</span>
+                  {deptInfo && <span className={`dept-tag dept-tag-${deptInfo.code}`} style={{ marginLeft: 2 }}>{deptInfo.display}</span>}
                 </>
               ) : currentVal ? (
                 <>
@@ -216,7 +339,7 @@ export default function EditableTable({
       // Plain options (section counts, periods, etc.)
       return (
         <select
-          className={isNarrow ? "cell-input-narrow" : "cell-input"}
+          className="conflict-rule-select"
           value={currentVal}
           onChange={e => handleCellChange(rIdx, col, e.target.value)}
         >
@@ -240,14 +363,22 @@ export default function EditableTable({
   }
 
   function thStyle(col: string): React.CSSProperties {
-    if (col === "notes") return { background: "#f9f8f5", minWidth: 120 };
+    if (flexSet.has(col)) {
+      const base: React.CSSProperties = { width: `${Math.floor(100 / flexColumns.length)}%`, whiteSpace: "nowrap" };
+      if (col === "notes") base.background = "#f9f8f5";
+      return base;
+    }
+    if (col === "notes") return { background: "#f9f8f5", width: "100%" };
+    if (refSet.has(col)) return { whiteSpace: "nowrap" };
     // Allow narrow/computed column headers to wrap so they don't drive column width
     if (narrowSet.has(col) || computedSet.has(col)) return { whiteSpace: "normal", textAlign: "center", maxWidth: 64 };
-    return {};
+    return { whiteSpace: "nowrap" };
   }
 
   function tdStyle(col: string): React.CSSProperties {
-    if (col === "notes") return { background: "#f9f8f5", minWidth: 120, verticalAlign: "top" };
+    if (flexSet.has(col)) return col === "notes" ? { background: "#f9f8f5", verticalAlign: "top" } : {};
+    if (col === "notes") return { background: "#f9f8f5", verticalAlign: "top" };
+    if (refSet.has(col)) return { whiteSpace: "nowrap" };
     if (narrowSet.has(col) || computedSet.has(col)) return { whiteSpace: "nowrap" };
     return { whiteSpace: "nowrap" };
   }
@@ -311,11 +442,30 @@ export default function EditableTable({
           <table className="data-table">
             <thead>
               <tr>
-                {columns.map(col => (
-                  <th key={col} style={thStyle(col)}>
-                    {columnLabels[col] || col.replace(/_/g, " ")}
-                  </th>
-                ))}
+                {columns.map(col => {
+                  const sortable = sortableColumns.includes(col);
+                  return (
+                    <th
+                      key={col}
+                      style={{
+                        ...thStyle(col),
+                        cursor: sortable ? "pointer" : undefined,
+                        userSelect: sortable ? "none" : undefined,
+                      }}
+                      onClick={sortable ? () => {
+                        if (sortCol === col) setSortDir(d => d === "asc" ? "desc" : "asc");
+                        else { setSortCol(col); setSortDir("asc"); }
+                      } : undefined}
+                    >
+                      {columnLabels[col] || col.replace(/_/g, " ")}
+                      {sortable && (sortCol === col
+                        ? (sortDir === "asc" ? " ↑" : " ↓")
+                        : <span style={{ color: "#ccc", marginLeft: 3 }}>⇅</span>
+                      )}
+                    </th>
+                  );
+                })}
+                {!columns.includes("notes") && flexColumns.length === 0 && <th style={{ width: "100%" }} />}
                 <th style={{ width: 40 }} />
               </tr>
             </thead>
@@ -326,7 +476,33 @@ export default function EditableTable({
                   .filter(({ row }) => {
                     if (!search.trim()) return true;
                     const q = search.toLowerCase();
-                    return Object.values(row).some(v => String(v ?? "").toLowerCase().includes(q));
+                    // Match raw values (IDs, numbers, text)
+                    if (Object.values(row).some(v => String(v ?? "").toLowerCase().includes(q))) return true;
+                    // Also match resolved display labels (e.g. "Health/Comp Sci" for course ID HE9898)
+                    return columns.some(col => {
+                      const val = String(row[col] ?? "");
+                      const opts = columnRefs[col];
+                      if (!opts) return false;
+                      const opt = opts.find(o => o.value === val);
+                      return opt ? opt.label.toLowerCase().includes(q) : false;
+                    });
+                  })
+                  .sort((a, b) => {
+                    // User-selected sort column takes priority
+                    if (sortCol) {
+                      const va = String(a.row[sortCol] ?? "").toLowerCase();
+                      const vb = String(b.row[sortCol] ?? "").toLowerCase();
+                      // Resolve display labels for ref columns
+                      const opts = columnRefs[sortCol];
+                      const la = opts ? (opts.find(o => o.value === va)?.label ?? va).toLowerCase() : va;
+                      const lb = opts ? (opts.find(o => o.value === vb)?.label ?? vb).toLowerCase() : vb;
+                      const cmp = la.localeCompare(lb);
+                      if (cmp !== 0) return sortDir === "asc" ? cmp : -cmp;
+                    }
+                    if (!groupByColumn) return 0;
+                    const ga = String(a.row[groupByColumn] ?? "").toLowerCase();
+                    const gb = String(b.row[groupByColumn] ?? "").toLowerCase();
+                    return ga < gb ? -1 : ga > gb ? 1 : 0;
                   });
                 let lastGroupVal: string | null = null;
                 return filtered.map(({ row, rIdx }, displayIdx) => {
@@ -342,13 +518,15 @@ export default function EditableTable({
                     }
                     lastGroupVal = groupVal;
                   }
+                  const isGridFixed = String(row["source"] ?? "") === "grid";
                   elements.push(
-                    <tr key={rIdx}>
+                    <tr key={rIdx} style={isGridFixed ? { background: "#eef4ff" } : undefined}>
                       {columns.map(col => (
                         <td key={col} style={tdStyle(col)}>
                           {renderCell(row, rIdx, col)}
                         </td>
                       ))}
+                      {!columns.includes("notes") && flexColumns.length === 0 && <td />}
                       <td style={{ width: 40, padding: "0 4px", position: "relative" }}>
                         {confirmDelete === rIdx ? (
                           <div className="delete-confirm">

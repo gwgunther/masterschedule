@@ -45,11 +45,14 @@ _SCHEMAS: dict[str, list[tuple[str, str]]] = {
         ("scenario_id", "TEXT"),
         ("course_id", "TEXT"),
         ("course_title", "TEXT"),
+        ("department", "TEXT"),
         ("enrollment_7th", "INTEGER"),
         ("enrollment_8th", "INTEGER"),
         ("total_enrollment", "INTEGER"),
         ("num_sections", "INTEGER"),
         ("max_class_size", "INTEGER"),
+        ("course_group", "TEXT"),
+        ("course_group_order", "INTEGER"),
         ("notes", "TEXT"),
     ],
     "teachers": [
@@ -57,7 +60,6 @@ _SCHEMAS: dict[str, list[tuple[str, str]]] = {
         ("teacher_id", "TEXT"),
         ("full_name", "TEXT"),
         ("department", "TEXT"),
-        ("max_sections", "INTEGER"),
     ],
     "teacher_qualifications": [
         ("scenario_id", "TEXT"),
@@ -76,6 +78,8 @@ _SCHEMAS: dict[str, list[tuple[str, str]]] = {
         ("teacher_id", "TEXT"),
         ("course_id", "TEXT"),
         ("period", "INTEGER"),
+        ("source", "TEXT"),
+        ("notes", "TEXT"),
     ],
     "coteaching_combinations": [
         ("scenario_id", "TEXT"),
@@ -104,6 +108,7 @@ _SCHEMAS: dict[str, list[tuple[str, str]]] = {
         ("group_name", "TEXT"),
         ("course_id", "TEXT"),
         ("constraint_type", "TEXT"),
+        ("max_per_period", "INTEGER"),
         ("notes", "TEXT"),
     ],
 }
@@ -171,7 +176,8 @@ def write_table(db_path: Path, table: str, scenario_id: str, rows: list[dict]) -
             row["scenario_id"] = scenario_id
             clean.append(row)
 
-        cols = list(clean[0].keys())
+        # Union all keys across all rows so sparse columns (e.g. "source") aren't dropped
+        cols = list(dict.fromkeys(k for r in clean for k in r.keys()))
         _ensure_columns(con, table, cols)
         placeholders = ", ".join("?" for _ in cols)
         col_names = ", ".join(f'"{c}"' for c in cols)

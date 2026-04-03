@@ -11,6 +11,7 @@ import {
   setContext,
   fetchProjectSettings,
   saveProjectSettings,
+  importScenarioZip,
   type Project,
   type Scenario,
   type ActiveContext,
@@ -34,6 +35,12 @@ export default function ManagePage({ context, onContextChange }: Props) {
   const [newScenarioName, setNewScenarioName] = useState("");
   const [cloneFrom, setCloneFrom] = useState<string>("");
   const [showNewScenario, setShowNewScenario] = useState(false);
+
+  // Import scenario from ZIP
+  const [showImport, setShowImport] = useState(false);
+  const [importName, setImportName] = useState("");
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importing, setImporting] = useState(false);
 
   // Project settings
   const [settings7th, setSettings7th] = useState("");
@@ -147,6 +154,24 @@ export default function ManagePage({ context, onContextChange }: Props) {
     const newCtx = await setContext(selectedProject, sc.slug);
     onContextChange(newCtx);
     await reload();
+  };
+
+  const handleImportZip = async () => {
+    if (!importName.trim() || !importFile || !selectedProject) return;
+    setImporting(true);
+    try {
+      const sc = await importScenarioZip(selectedProject, importName.trim(), importFile);
+      setImportName("");
+      setImportFile(null);
+      setShowImport(false);
+      const newCtx = await setContext(selectedProject, sc.slug);
+      onContextChange(newCtx);
+      await reload();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Import failed");
+    } finally {
+      setImporting(false);
+    }
   };
 
   const startRenamingScenario = (slug: string, current: string) => {
@@ -294,9 +319,14 @@ export default function ManagePage({ context, onContextChange }: Props) {
             )}
           </div>
           {selectedProject && (
-            <button className="btn-small" onClick={() => { setShowNewScenario(true); setNewScenarioName(""); setCloneFrom(context.scenario || ""); }}>
-              + New Scenario
-            </button>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button className="btn-small" onClick={() => { setShowImport(true); setImportName(""); setImportFile(null); setShowNewScenario(false); }}>
+                Import ZIP
+              </button>
+              <button className="btn-small" onClick={() => { setShowNewScenario(true); setNewScenarioName(""); setCloneFrom(context.scenario || ""); setShowImport(false); }}>
+                + New Scenario
+              </button>
+            </div>
           )}
         </div>
 
@@ -330,6 +360,31 @@ export default function ManagePage({ context, onContextChange }: Props) {
             </div>
             <button className="btn-small" onClick={handleCreateScenario} style={{ height: 32 }}>Create</button>
             <button className="manage-cancel" onClick={() => setShowNewScenario(false)}>✕</button>
+          </div>
+        )}
+
+        {showImport && selectedProject && (
+          <div style={{ padding: "12px 32px", borderBottom: "1px solid #e0ddd5", display: "flex", gap: 10, alignItems: "flex-end" }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6, flex: 1 }}>
+              <input
+                className="selector-input"
+                placeholder="Scenario name"
+                value={importName}
+                onChange={(e) => setImportName(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Escape") setShowImport(false); }}
+                autoFocus
+              />
+              <input
+                type="file"
+                accept=".zip"
+                onChange={(e) => setImportFile(e.target.files?.[0] ?? null)}
+                style={{ fontFamily: "'Helvetica Neue', Arial, sans-serif", fontSize: 11, color: "#555" }}
+              />
+            </div>
+            <button className="btn-small" onClick={handleImportZip} disabled={!importName.trim() || !importFile || importing} style={{ height: 32 }}>
+              {importing ? "Importing…" : "Import"}
+            </button>
+            <button className="manage-cancel" onClick={() => setShowImport(false)}>✕</button>
           </div>
         )}
 
