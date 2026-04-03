@@ -62,7 +62,6 @@ _SCHEMAS: dict[str, list[tuple[str, str]]] = {
     "teacher_qualifications": [
         ("scenario_id", "TEXT"),
         ("teacher_id", "TEXT"),
-        ("department", "TEXT"),
         ("course_id", "TEXT"),
     ],
     "teacher_section_locks": [
@@ -76,15 +75,14 @@ _SCHEMAS: dict[str, list[tuple[str, str]]] = {
         ("scenario_id", "TEXT"),
         ("teacher_id", "TEXT"),
         ("course_id", "TEXT"),
-        ("course_display", "TEXT"),
         ("period", "INTEGER"),
     ],
     "coteaching_combinations": [
         ("scenario_id", "TEXT"),
-        ("coteach_id", "TEXT"),
-        ("sped_teacher", "TEXT"),
         ("gened_teacher", "TEXT"),
-        ("gened_course", "TEXT"),
+        ("gened_course_code", "TEXT"),
+        ("swd_teacher", "TEXT"),
+        ("swd_course_code", "TEXT"),
         ("num_sections", "INTEGER"),
         ("notes", "TEXT"),
     ],
