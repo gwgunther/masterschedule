@@ -4,11 +4,14 @@ import { fetchTable, saveTable } from "../api";
 interface Course {
   course_id: string;
   course_title: string;
+  department: string;
   enrollment_7th: string;
   enrollment_8th: string;
   total_enrollment: string;
   num_sections: string;
   max_class_size: string;
+  course_group: string;
+  course_group_order: string;
   notes: string;
   [key: string]: unknown;
 }
@@ -29,37 +32,42 @@ function DownloadIcon() {
 }
 
 interface Props {
-  teacherOptions: { value: string; label: string }[];
   onExport?: () => void;
 }
 
-export default function CourseQualificationsTable({ teacherOptions, onExport }: Props) {
+export default function CourseQualificationsTable({ onExport }: Props) {
   const [courses, setCourses] = useState<Course[]>([]);
   const [teachers, setTeachers] = useState<Teacher[]>([]);
-  // courseId → Set<teacherId>
   const [qualMap, setQualMap] = useState<Map<string, Set<string>>>(new Map());
   const [loading, setLoading] = useState(true);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState<{ type: "ok" | "err"; msg: string } | null>(null);
   const [search, setSearch] = useState("");
-  const [addingFor, setAddingFor] = useState<string | null>(null); // course_id
-  const [addSearch, setAddSearch] = useState("");
-  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
-  const addRef = useRef<HTMLDivElement>(null);
+  const [linkingFor, setLinkingFor] = useState<string | null>(null);
+  const [linkSearch, setLinkSearch] = useState("");
+  const [confirmDelete, setConfirmDelete] = useState<number | null>(null);
+  const [sortCol, setSortCol] = useState<"course_id" | "course_title" | null>(null);
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+  const linkRef = useRef<HTMLDivElement>(null);
+
+  // Assigned teachers from section locks: courseId → [{teacher_id, num_sections}]
+  const [lockMap, setLockMap] = useState<Map<string, { teacher_id: string; num_sections: number }[]>>(new Map());
+  const [deptOptions, setDeptOptions] = useState<{ code: string; display: string }[]>([]);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [courseRows, teacherRows, qualRows] = await Promise.all([
+      const [courseRows, teacherRows, qualRows, lockRows, deptRows] = await Promise.all([
         fetchTable("courses"),
         fetchTable("teachers"),
         fetchTable("teacher_qualifications"),
+        fetchTable("teacher_section_locks"),
+        fetchTable("departments"),
       ]);
       setCourses(courseRows as Course[]);
       setTeachers(teacherRows as Teacher[]);
-
-      // Build courseId → Set<teacherId>
+      setDeptOptions((deptRows as { department_code: string; display_name: string }[]).map(d => ({ code: d.department_code, display: d.display_name })));
       const map = new Map<string, Set<string>>();
       for (const c of courseRows as Course[]) map.set(c.course_id, new Set());
       for (const q of qualRows as { teacher_id: string; course_id: string }[]) {
@@ -67,6 +75,13 @@ export default function CourseQualificationsTable({ teacherOptions, onExport }: 
         map.get(q.course_id)!.add(q.teacher_id);
       }
       setQualMap(map);
+      // Build lock map: course → teachers with section counts
+      const lm = new Map<string, { teacher_id: string; num_sections: number }[]>();
+      for (const r of lockRows as { teacher_id: string; course_id: string; num_sections: string }[]) {
+        if (!lm.has(r.course_id)) lm.set(r.course_id, []);
+        lm.get(r.course_id)!.push({ teacher_id: r.teacher_id, num_sections: Number(r.num_sections) || 0 });
+      }
+      setLockMap(lm);
       setDirty(false);
     } finally {
       setLoading(false);
@@ -77,9 +92,8 @@ export default function CourseQualificationsTable({ teacherOptions, onExport }: 
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
-      if (addRef.current && !addRef.current.contains(e.target as Node)) {
-        setAddingFor(null);
-        setAddSearch("");
+      if (linkRef.current && !linkRef.current.contains(e.target as Node)) {
+        setLinkingFor(null); setLinkSearch("");
       }
     };
     document.addEventListener("mousedown", handler);
@@ -91,60 +105,99 @@ export default function CourseQualificationsTable({ teacherOptions, onExport }: 
     setTimeout(() => setToast(null), 3000);
   }
 
-  function handleCellChange(courseId: string, col: string, value: string) {
-    setCourses(prev => prev.map(c => c.course_id === courseId ? { ...c, [col]: value } : c));
+  function handleCellChange(idx: number, col: string, value: string) {
+    setCourses(prev => {
+      const next = [...prev];
+      const oldId = next[idx].course_id;
+      next[idx] = { ...next[idx], [col]: value };
+      // If course_id changed, migrate the qualMap key so quals aren't lost
+      if (col === "course_id" && oldId !== value) {
+        setQualMap(qm => {
+          const nextQm = new Map(qm);
+          const existing = nextQm.get(oldId) ?? new Set();
+          nextQm.delete(oldId);
+          nextQm.set(value, existing);
+          return nextQm;
+        });
+      }
+      return next;
+    });
+    setDirty(true);
+  }
+
+  function handleMaxSizeChange(idx: number, value: string) {
+    // Sync max_class_size across all courses in the same group
+    setCourses(prev => {
+      const group = prev[idx]?.course_group;
+      return prev.map((c, i) => {
+        if (i === idx) return { ...c, max_class_size: value };
+        if (group && c.course_group === group) return { ...c, max_class_size: value };
+        return c;
+      });
+    });
+    setDirty(true);
+  }
+
+  function linkCourses(courseAId: string, courseBId: string) {
+    const groupId = `${courseAId}__${courseBId}`;
+    setCourses(prev => prev.map(c => {
+      if (c.course_id === courseAId) return { ...c, course_group: groupId, course_group_order: "0" };
+      if (c.course_id === courseBId) return { ...c, course_group: groupId, course_group_order: "1" };
+      return c;
+    }));
+    setLinkingFor(null);
+    setLinkSearch("");
+    setDirty(true);
+  }
+
+  function unlinkCourse(groupId: string) {
+    setCourses(prev => prev.map(c =>
+      c.course_group === groupId ? { ...c, course_group: "", course_group_order: "" } : c
+    ));
+    setDirty(true);
+  }
+
+  function switchGroupOrder(groupId: string) {
+    setCourses(prev => prev.map(c => {
+      if (c.course_group !== groupId) return c;
+      return { ...c, course_group_order: c.course_group_order === "0" ? "1" : "0" };
+    }));
     setDirty(true);
   }
 
   function addCourse() {
     const empty: Course = {
-      course_id: "", course_title: "", enrollment_7th: "", enrollment_8th: "",
-      total_enrollment: "", num_sections: "", max_class_size: "", notes: "",
+      course_id: "", course_title: "", department: "", enrollment_7th: "", enrollment_8th: "",
+      total_enrollment: "", num_sections: "", max_class_size: "",
+      course_group: "", course_group_order: "", notes: "",
     };
     setCourses(prev => [...prev, empty]);
     setDirty(true);
   }
 
-  function deleteCourse(courseId: string) {
-    setCourses(prev => prev.filter(c => c.course_id !== courseId));
-    setQualMap(prev => { const next = new Map(prev); next.delete(courseId); return next; });
+  function deleteCourse(idx: number) {
+    setCourses(prev => {
+      const course = prev[idx];
+      // If grouped, clear the group from the partner too
+      if (course?.course_group) {
+        const groupId = course.course_group;
+        setTimeout(() => unlinkCourse(groupId), 0);
+      }
+      setQualMap(qm => { const next = new Map(qm); next.delete(course.course_id); return next; });
+      return prev.filter((_, i) => i !== idx);
+    });
     setDirty(true);
     setConfirmDelete(null);
   }
 
-  function addQual(courseId: string, teacherId: string) {
-    setQualMap(prev => {
-      const next = new Map(prev);
-      const s = new Set(next.get(courseId) ?? []);
-      s.add(teacherId);
-      next.set(courseId, s);
-      return next;
-    });
-    setDirty(true);
-    setAddSearch("");
-  }
-
-  function removeQual(courseId: string, teacherId: string) {
-    setQualMap(prev => {
-      const next = new Map(prev);
-      const s = new Set(next.get(courseId) ?? []);
-      s.delete(teacherId);
-      next.set(courseId, s);
-      return next;
-    });
-    setDirty(true);
-  }
 
   async function handleSave() {
     setSaving(true);
     try {
       await saveTable("courses", courses);
-      // Reconstruct full qualifications from map (all courses × teachers)
       const qualRows: { teacher_id: string; course_id: string }[] = [];
       for (const [cid, teacherSet] of qualMap.entries()) {
-        for (const tid of teacherSet) {
-          qualRows.push({ teacher_id: tid, course_id: cid });
-        }
+        for (const tid of teacherSet) qualRows.push({ teacher_id: tid, course_id: cid });
       }
       await saveTable("teacher_qualifications", qualRows);
       setDirty(false);
@@ -158,20 +211,100 @@ export default function CourseQualificationsTable({ teacherOptions, onExport }: 
 
   const teacherMap = new Map(teachers.map(t => [t.teacher_id, t.full_name]));
 
+  // Build group map: groupId → [primary, secondary] (sorted by order)
+  function buildGroups(courseList: Course[]): Map<string, [Course, Course]> {
+    const map = new Map<string, Course[]>();
+    for (const c of courseList) {
+      if (!c.course_group) continue;
+      if (!map.has(c.course_group)) map.set(c.course_group, []);
+      map.get(c.course_group)!.push(c);
+    }
+    const result = new Map<string, [Course, Course]>();
+    for (const [gid, members] of map.entries()) {
+      if (members.length !== 2) continue;
+      const sorted = [...members].sort((a, b) => Number(a.course_group_order) - Number(b.course_group_order));
+      result.set(gid, [sorted[0], sorted[1]]);
+    }
+    return result;
+  }
+
+  function toggleSort(col: "course_id" | "course_title") {
+    if (sortCol === col) setSortDir(d => d === "asc" ? "desc" : "asc");
+    else { setSortCol(col); setSortDir("asc"); }
+  }
+
+  // Sort courses as units: groups sort by primary's value, ungrouped sort individually.
+  // All units interleaved in one sorted list.
+  function sortedCourses(courseList: Course[]): Course[] {
+    const groups = buildGroups(courseList);
+
+    // Build units: each unit has a sort key and an ordered list of courses to emit
+    type Unit = { key: string; courses: Course[] };
+    const units: Unit[] = [];
+    const seen = new Set<string>();
+
+    for (const c of courseList) {
+      if (c.course_group && groups.has(c.course_group)) {
+        if (seen.has(c.course_group)) continue;
+        seen.add(c.course_group);
+        const [primary, secondary] = groups.get(c.course_group)!;
+        const key = sortCol === "course_title"
+          ? (primary.course_title ?? "").toLowerCase()
+          : primary.course_id.toLowerCase();
+        units.push({ key, courses: [primary, secondary] });
+      } else {
+        const key = sortCol === "course_title"
+          ? (c.course_title ?? "").toLowerCase()
+          : c.course_id.toLowerCase();
+        units.push({ key, courses: [c] });
+      }
+    }
+
+    if (sortCol) {
+      units.sort((a, b) => sortDir === "asc"
+        ? a.key.localeCompare(b.key)
+        : b.key.localeCompare(a.key));
+    }
+
+    return units.flatMap(u => u.courses);
+  }
+
+  function renderGroupedStatus(primary: Course, secondary: Course) {
+    const combinedEnr = (Number(primary.total_enrollment) || 0) + (Number(secondary.total_enrollment) || 0);
+    const primarySections = Number(primary.num_sections) || 0;
+    const maxSize = Number(primary.max_class_size) || 0;
+    if (combinedEnr <= 0 || primarySections <= 0) return <span style={{ color: "#ccc", fontSize: 11 }}>—</span>;
+    if (maxSize <= 0) return (
+      <span style={{ fontFamily: "'Helvetica Neue', Arial, sans-serif", fontSize: 10, color: "#aaa" }}>
+        {combinedEnr} enrolled
+      </span>
+    );
+    const capacity = primarySections * maxSize;
+    const diff = combinedEnr - capacity;
+    const color = diff > 0 ? "#b91c1c" : diff < 0 ? "#166534" : "#aaa";
+    const avgSize = parseFloat((combinedEnr / primarySections).toFixed(1));
+    return (
+      <span style={{ fontFamily: "'Helvetica Neue', Arial, sans-serif", display: "flex", flexDirection: "column", gap: 1, lineHeight: 1.3, alignItems: "center" }}>
+        <span style={{ fontSize: 11, fontWeight: 500, color, whiteSpace: "nowrap" }}>
+          {combinedEnr}/{capacity}{diff !== 0 && <span style={{ fontSize: 10, fontWeight: 400 }}> ({diff > 0 ? "+" : ""}{diff})</span>}
+        </span>
+        <span style={{ fontSize: 10, fontWeight: 400, color: "#aaa", whiteSpace: "nowrap" }}>
+          {avgSize}/section
+        </span>
+      </span>
+    );
+  }
+
   function renderStatus(course: Course) {
     const enrollment = Number(course.total_enrollment) || 0;
     const sections = Number(course.num_sections) || 0;
     const maxSize = Number(course.max_class_size) || 0;
-    if (enrollment <= 0 || sections <= 0) {
-      return <span style={{ color: "#ccc", fontSize: 11 }}>—</span>;
-    }
-    if (maxSize <= 0) {
-      return (
-        <span style={{ fontFamily: "'Helvetica Neue', Arial, sans-serif", fontSize: 10, color: "#aaa" }}>
-          {parseFloat((enrollment / sections).toFixed(1))}/section
-        </span>
-      );
-    }
+    if (enrollment <= 0 || sections <= 0) return <span style={{ color: "#ccc", fontSize: 11 }}>—</span>;
+    if (maxSize <= 0) return (
+      <span style={{ fontFamily: "'Helvetica Neue', Arial, sans-serif", fontSize: 10, color: "#aaa" }}>
+        {parseFloat((enrollment / sections).toFixed(1))}/section
+      </span>
+    );
     const capacity = sections * maxSize;
     const diff = enrollment - capacity;
     const color = diff > 0 ? "#b91c1c" : diff < 0 ? "#166534" : "#aaa";
@@ -188,18 +321,30 @@ export default function CourseQualificationsTable({ teacherOptions, onExport }: 
     );
   }
 
-  const filteredCourses = courses.filter(c => {
+  // Build indexed list first so we can carry originalIdx through sort/filter
+  const indexedCourses = courses.map((course, originalIdx) => ({ course, originalIdx }));
+
+  const filteredIndexed = indexedCourses.filter(({ course }) => {
     if (!search.trim()) return true;
     const q = search.toLowerCase();
-    const quals = [...(qualMap.get(c.course_id) ?? [])].map(tid => teacherMap.get(tid) ?? tid).join(" ").toLowerCase();
+    const quals = [...(qualMap.get(course.course_id) ?? [])].map(tid => teacherMap.get(tid) ?? tid).join(" ").toLowerCase();
     return (
-      c.course_id.toLowerCase().includes(q) ||
-      (c.course_title ?? "").toLowerCase().includes(q) ||
+      course.course_id.toLowerCase().includes(q) ||
+      (course.course_title ?? "").toLowerCase().includes(q) ||
       quals.includes(q)
     );
   });
 
-  const SECTION_OPTIONS = Array.from({ length: 20 }, (_, i) => String(i + 1));
+  // Sort while preserving originalIdx
+  const filteredCourses = filteredIndexed.map(x => x.course);
+  const sortedFiltered = sortedCourses(filteredCourses);
+  // Re-attach originalIdx by matching course_id reference (object identity safe after sort)
+  const idxByCourse = new Map(filteredIndexed.map(x => [x.course, x.originalIdx]));
+  const displayCourses = sortedFiltered.map(c => ({ course: c, originalIdx: idxByCourse.get(c) ?? courses.indexOf(c) }));
+  const groups = buildGroups(displayCourses.map(x => x.course));
+
+  // Track which secondary rows we've already rendered (to skip their shared cells)
+  const renderedSecondaries = new Set<string>();
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
@@ -215,11 +360,9 @@ export default function CourseQualificationsTable({ teacherOptions, onExport }: 
           value={search}
           onChange={e => setSearch(e.target.value)}
           style={{
-            fontSize: 11, padding: "4px 10px",
-            border: "1px solid #e0e0e0", borderRadius: 6,
-            outline: "none", width: 220,
-            fontFamily: "'Helvetica Neue', Arial, sans-serif", color: "#1a1a1a",
-            background: search ? "#fffbe6" : "#fff",
+            fontSize: 11, padding: "4px 10px", border: "1px solid #e0e0e0", borderRadius: 6,
+            outline: "none", width: 220, fontFamily: "'Helvetica Neue', Arial, sans-serif",
+            color: "#1a1a1a", background: search ? "#fffbe6" : "#fff",
           }}
         />
         {toast && <span className={`toast toast-${toast.type}`}>{toast.msg}</span>}
@@ -235,12 +378,9 @@ export default function CourseQualificationsTable({ teacherOptions, onExport }: 
           style={{ fontSize: 11, padding: "5px 12px" }}
           onClick={handleSave}
           disabled={!dirty || saving}
-        >
-          {saving ? "Saving…" : "Save"}
-        </button>
+        >{saving ? "Saving…" : "Save"}</button>
       </div>
 
-      {/* Table */}
       {loading ? (
         <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: "#aaa", fontSize: 12 }}>Loading…</div>
       ) : (
@@ -248,141 +388,183 @@ export default function CourseQualificationsTable({ teacherOptions, onExport }: 
           <table className="data-table" style={{ tableLayout: "auto", width: "100%" }}>
             <thead>
               <tr>
-                <th style={{ minWidth: 100 }}>course id</th>
-                <th style={{ minWidth: 160 }}>title</th>
+                <th style={{ width: 6, padding: 0 }} />
+                <th
+                  style={{ minWidth: 100, cursor: "pointer", userSelect: "none" }}
+                  onClick={() => toggleSort("course_id")}
+                >
+                  course id {sortCol === "course_id" ? (sortDir === "asc" ? "↑" : "↓") : <span style={{ color: "#ccc" }}>⇅</span>}
+                </th>
+                <th
+                  style={{ minWidth: 160, cursor: "pointer", userSelect: "none" }}
+                  onClick={() => toggleSort("course_title")}
+                >
+                  title {sortCol === "course_title" ? (sortDir === "asc" ? "↑" : "↓") : <span style={{ color: "#ccc" }}>⇅</span>}
+                </th>
+                <th style={{ whiteSpace: "nowrap" }}>dept</th>
                 <th style={{ minWidth: 56, textAlign: "center" }}>enr 7</th>
                 <th style={{ minWidth: 56, textAlign: "center" }}>enr 8</th>
-                <th style={{ minWidth: 56, textAlign: "center" }}>total</th>
+                <th style={{ minWidth: 56, textAlign: "center", borderRight: "2px solid #e8e4dc" }}>total</th>
                 <th style={{ minWidth: 56, textAlign: "center" }}>sections</th>
                 <th style={{ minWidth: 56, textAlign: "center" }}>max size</th>
-                <th style={{ minWidth: 80, textAlign: "center" }}>status</th>
-                <th>qualified teachers</th>
-                <th style={{ minWidth: 120 }}>notes</th>
-                <th style={{ width: 40 }} />
+                <th style={{ minWidth: 80, textAlign: "center", borderRight: "2px solid #e8e4dc" }}>status</th>
+                <th style={{ minWidth: 120 }}>assigned to</th>
+                <th style={{ width: "100%", background: "#f9f8f5" }}>notes</th>
+                <th style={{ width: 80 }} />
               </tr>
             </thead>
             <tbody>
-              {filteredCourses.map(course => {
-                const quals = [...(qualMap.get(course.course_id) ?? [])].sort();
-                const isAddingHere = addingFor === course.course_id;
+              {displayCourses.map(({ course, originalIdx }) => {
+                const isLinkingHere = linkingFor === course.course_id;
+                const groupId = course.course_group;
+                const groupPair = groupId ? groups.get(groupId) : undefined;
+                const isPrimary = groupPair ? groupPair[0].course_id === course.course_id : false;
+                const isSecondary = groupPair ? groupPair[1].course_id === course.course_id : false;
 
-                const available = teacherOptions.filter(t =>
-                  !quals.includes(t.value) &&
-                  (!addSearch.trim() || t.label.toLowerCase().includes(addSearch.toLowerCase()) || t.value.toLowerCase().includes(addSearch.toLowerCase()))
+                // Skip shared cells on secondary row
+                const skipShared = isSecondary && renderedSecondaries.has(groupId!);
+                if (isPrimary && groupId) renderedSecondaries.add(groupId);
+
+                // Courses available to link with (ungrouped, not self)
+                const linkableCourses = courses.filter(c =>
+                  c.course_id !== course.course_id && !c.course_group &&
+                  (!linkSearch.trim() || c.course_title?.toLowerCase().includes(linkSearch.toLowerCase()) || c.course_id.toLowerCase().includes(linkSearch.toLowerCase()))
                 );
 
+                const rowClass = groupPair
+                  ? (isPrimary ? "cg-row cg-primary" : "cg-row cg-secondary")
+                  : "";
+
                 return (
-                  <tr key={course.course_id}>
+                  <tr key={originalIdx} className={rowClass}>
+                    {/* Group bracket column */}
+                    <td className={groupPair ? (isPrimary ? "cg-bracket cg-bracket-top" : "cg-bracket cg-bracket-bottom") : "cg-bracket"} />
+
                     <td style={{ whiteSpace: "nowrap" }}>
                       <input className="cell-input" value={course.course_id}
-                        onChange={e => handleCellChange(course.course_id, "course_id", e.target.value)} />
+                        onChange={e => handleCellChange(originalIdx, "course_id", e.target.value)} />
                     </td>
                     <td>
                       <input className="cell-input" value={course.course_title ?? ""}
-                        onChange={e => handleCellChange(course.course_id, "course_title", e.target.value)} />
+                        onChange={e => handleCellChange(originalIdx, "course_title", e.target.value)} />
                     </td>
-                    <td style={{ textAlign: "center" }}>
-                      <input className="cell-input-narrow" value={course.enrollment_7th ?? ""}
-                        onChange={e => handleCellChange(course.course_id, "enrollment_7th", e.target.value)} />
-                    </td>
-                    <td style={{ textAlign: "center" }}>
-                      <input className="cell-input-narrow" value={course.enrollment_8th ?? ""}
-                        onChange={e => handleCellChange(course.course_id, "enrollment_8th", e.target.value)} />
-                    </td>
-                    <td style={{ textAlign: "center" }}>
-                      <input className="cell-input-narrow" value={course.total_enrollment ?? ""}
-                        onChange={e => handleCellChange(course.course_id, "total_enrollment", e.target.value)} />
-                    </td>
-                    <td style={{ textAlign: "center" }}>
-                      <select className="cell-input-narrow" value={course.num_sections ?? ""}
-                        onChange={e => handleCellChange(course.course_id, "num_sections", e.target.value)}>
+                    <td style={{ whiteSpace: "nowrap" }}>
+                      <select
+                        className="conflict-rule-select"
+                        value={course.department ?? ""}
+                        onChange={e => handleCellChange(originalIdx, "department", e.target.value)}
+                      >
                         <option value="">—</option>
-                        {SECTION_OPTIONS.map(n => <option key={n} value={n}>{n}</option>)}
+                        {deptOptions.map(d => <option key={d.code} value={d.code}>{d.display}</option>)}
                       </select>
                     </td>
                     <td style={{ textAlign: "center" }}>
-                      <input className="cell-input-narrow" value={course.max_class_size ?? ""}
-                        onChange={e => handleCellChange(course.course_id, "max_class_size", e.target.value)} />
+                      <input className="cell-input-narrow" value={course.enrollment_7th ?? ""}
+                        onChange={e => handleCellChange(originalIdx, "enrollment_7th", e.target.value)} />
                     </td>
-
-                    {/* Status (computed) */}
                     <td style={{ textAlign: "center" }}>
-                      {renderStatus(course)}
+                      <input className="cell-input-narrow" value={course.enrollment_8th ?? ""}
+                        onChange={e => handleCellChange(originalIdx, "enrollment_8th", e.target.value)} />
+                    </td>
+                    <td style={{ textAlign: "center", borderRight: "2px solid #e8e4dc" }}>
+                      <input className="cell-input-narrow" value={course.total_enrollment ?? ""}
+                        onChange={e => handleCellChange(originalIdx, "total_enrollment", e.target.value)} />
+                    </td>
+                    <td style={{ textAlign: "center" }}>
+                      {isSecondary ? (
+                        <span
+                          title="Secondary course — primary course sections count for capacity"
+                          style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 1 }}
+                        >
+                          <span style={{ color: "#bbb", fontSize: 12, fontFamily: "'Helvetica Neue', Arial, sans-serif" }}>
+                            {course.num_sections || "—"}
+                          </span>
+                          <span style={{ color: "#ccc", fontSize: 9, fontFamily: "'Helvetica Neue', Arial, sans-serif", fontStyle: "italic" }}>
+                            not counted
+                          </span>
+                        </span>
+                      ) : (
+                        <span style={{ color: "#888", fontSize: 12, fontFamily: "'Helvetica Neue', Arial, sans-serif" }}>
+                          {course.num_sections || "—"}
+                        </span>
+                      )}
                     </td>
 
-                    {/* Qualified teachers column */}
-                    <td style={{ position: "relative" }}>
-                      <div style={{ display: "flex", flexWrap: "wrap", gap: 4, alignItems: "center", padding: "2px 0" }}>
-                        {quals.map(tid => (
-                          <span key={tid} className="qual-tag" title={tid}>
-                            <span className="qual-tag-label">{teacherMap.get(tid) ?? tid}</span>
-                            <button
-                              className="qual-tag-remove"
-                              onClick={() => removeQual(course.course_id, tid)}
-                              title="Remove"
-                            >×</button>
+                    {/* Shared max size — rowspan on primary, skip on secondary */}
+                    {!skipShared && (
+                      <td style={{ textAlign: "center" }} rowSpan={groupPair ? 2 : 1} className={groupPair ? "cg-shared-cell" : ""}>
+                        <input className="cell-input-narrow" value={course.max_class_size ?? ""}
+                          onChange={e => handleMaxSizeChange(originalIdx, e.target.value)} />
+                      </td>
+                    )}
+
+                    {/* Shared status — rowspan on primary, skip on secondary */}
+                    {!skipShared && (
+                      <td style={{ textAlign: "center", borderRight: "2px solid #e8e4dc" }} rowSpan={groupPair ? 2 : 1} className={groupPair ? "cg-shared-cell" : ""}>
+                        {groupPair ? renderGroupedStatus(groupPair[0], groupPair[1]) : renderStatus(course)}
+                      </td>
+                    )}
+
+                    {/* Assigned teachers from section locks (read-only) */}
+                    <td>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 3, padding: "2px 0" }}>
+                        {(lockMap.get(course.course_id) ?? []).map(({ teacher_id, num_sections }) => (
+                          <span key={teacher_id} style={{
+                            fontSize: 10, fontFamily: "'Helvetica Neue', Arial, sans-serif",
+                            background: "#f0eee8", color: "#555", borderRadius: 4,
+                            padding: "1px 6px", whiteSpace: "nowrap",
+                          }}>
+                            {teacherMap.get(teacher_id) ?? teacher_id}
+                            <span style={{ color: "#999", marginLeft: 2 }}>({num_sections})</span>
                           </span>
                         ))}
-
-                        <div ref={isAddingHere ? addRef : undefined} style={{ position: "relative" }}>
-                          <button
-                            className="qual-add-btn"
-                            onClick={() => { setAddingFor(isAddingHere ? null : course.course_id); setAddSearch(""); }}
-                          >
-                            + Add
-                          </button>
-                          {isAddingHere && (
-                            <div className="qual-dropdown">
-                              <input
-                                autoFocus
-                                className="qual-search"
-                                placeholder="Search teachers…"
-                                value={addSearch}
-                                onChange={e => setAddSearch(e.target.value)}
-                              />
-                              <div className="qual-dropdown-list">
-                                {available.length === 0 ? (
-                                  <div className="qual-dropdown-empty">No matches</div>
-                                ) : (
-                                  available.slice(0, 50).map(t => (
-                                    <button
-                                      key={t.value}
-                                      className="qual-dropdown-item"
-                                      onClick={() => addQual(course.course_id, t.value)}
-                                    >
-                                      <span className="qual-dropdown-id">{t.value}</span>
-                                      <span className="qual-dropdown-title">{t.label}</span>
-                                    </button>
-                                  ))
-                                )}
-                              </div>
-                            </div>
-                          )}
-                        </div>
                       </div>
                     </td>
 
-                    <td>
-                      <textarea
-                        className="notes-textarea"
-                        value={course.notes ?? ""}
-                        rows={1}
-                        onChange={e => handleCellChange(course.course_id, "notes", e.target.value)}
-                      />
+                    <td style={{ background: "#f9f8f5" }}>
+                      <textarea className="notes-textarea" value={course.notes ?? ""} rows={1}
+                        onChange={e => handleCellChange(originalIdx, "notes", e.target.value)} />
                     </td>
 
-                    {/* Delete action */}
-                    <td style={{ width: 40, padding: "0 4px", position: "relative" }}>
-                      {confirmDelete === course.course_id ? (
-                        <div className="delete-confirm">
-                          <button className="delete-confirm-yes" onClick={() => deleteCourse(course.course_id)}>Delete</button>
-                          <button className="delete-confirm-no" onClick={() => setConfirmDelete(null)}>Cancel</button>
-                        </div>
-                      ) : (
-                        <button className="row-action-btn" onClick={() => setConfirmDelete(course.course_id)} title="Row actions">
-                          ⋯
-                        </button>
-                      )}
+                    {/* Action column: group controls + delete */}
+                    <td style={{ width: 80, padding: "0 4px", position: "relative", whiteSpace: "nowrap" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 4, justifyContent: "flex-end" }}>
+                        {/* Group controls */}
+                        {groupPair && isPrimary && (
+                          <>
+                            <button className="cg-action-btn" title="Switch primary/secondary" onClick={() => switchGroupOrder(groupId!)}>⇅</button>
+                            <button className="cg-action-btn cg-unlink-btn" title="Unlink courses" onClick={() => unlinkCourse(groupId!)}>⊗</button>
+                          </>
+                        )}
+                        {!groupPair && (
+                          <div ref={isLinkingHere ? linkRef : undefined} style={{ position: "relative" }}>
+                            <button className="cg-action-btn cg-link-btn" title="Link to another course" onClick={() => { setLinkingFor(isLinkingHere ? null : course.course_id); setLinkSearch(""); }}>⇢</button>
+                            {isLinkingHere && (
+                              <div className="qual-dropdown" style={{ right: 0, left: "auto", minWidth: 220 }}>
+                                <input autoFocus className="qual-search" placeholder="Search course to link…" value={linkSearch} onChange={e => setLinkSearch(e.target.value)} />
+                                <div className="qual-dropdown-list">
+                                  {linkableCourses.length === 0 ? <div className="qual-dropdown-empty">No ungrouped courses</div> : linkableCourses.slice(0, 30).map(c => (
+                                    <button key={c.course_id} className="qual-dropdown-item" onClick={() => linkCourses(course.course_id, c.course_id)}>
+                                      <span className="qual-dropdown-id">{c.course_id}</span>
+                                      <span className="qual-dropdown-title">{c.course_title}</span>
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Delete */}
+                        {confirmDelete === originalIdx ? (
+                          <>
+                            <button className="delete-confirm-yes" onClick={() => deleteCourse(originalIdx)}>Del</button>
+                            <button className="delete-confirm-no" onClick={() => setConfirmDelete(null)}>✕</button>
+                          </>
+                        ) : (
+                          <button className="row-action-btn" onClick={() => setConfirmDelete(originalIdx)} title="Delete">⋯</button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 );

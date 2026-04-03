@@ -84,11 +84,11 @@ def validate_data(db_path: Path, scenario_id: str) -> list[dict]:
 
     # coteaching_combinations: valid FKs
     for r in data["coteaching_combinations"]:
-        for key in ("sped_teacher", "gened_teacher"):
+        for key in ("swd_teacher", "gened_teacher"):
             val = r.get(key, "")
             if val and val not in teachers:
                 issues.append({"level": "error", "message": f"coteaching_combinations: unknown teacher '{val}'"})
-        for key in ("coteach_id", "gened_course"):
+        for key in ("swd_course_code", "gened_course_code"):
             val = r.get(key, "")
             if val and val not in courses:
                 issues.append({"level": "error", "message": f"coteaching_combinations: unknown course '{val}'"})
@@ -104,26 +104,18 @@ def validate_data(db_path: Path, scenario_id: str) -> list[dict]:
             if val and val not in courses:
                 issues.append({"level": "error", "message": f"semester_pairs: unknown course '{val}'"})
 
-    # Teacher overload check
-    from collections import defaultdict
-    lock_counts = defaultdict(int)
-    for r in data["teacher_section_locks"]:
-        lock_counts[r["teacher_id"]] += int(r.get("num_sections", 0) or 0)
-    for t_id, count in lock_counts.items():
-        t = teacher_map.get(t_id)
-        if t and int(t.get("max_sections", 0) or 0) > 0 and count > int(t["max_sections"]):
-            issues.append({
-                "level": "error",
-                "message": f"Teacher {_t(t_id, teacher_map)} section locks ({count}) exceed max_sections ({t['max_sections']})"
-            })
-
     # Section budget check
+    from collections import defaultdict
     total_sections_needed = sum(int(c.get("num_sections", 0) or 0) for c in data["courses"] if c["course_id"] not in NON_INSTRUCTIONAL)
-    total_capacity = sum(int(t.get("max_sections", 0) or 0) for t in data["teachers"])
-    if total_sections_needed > total_capacity:
+    quota_sums: dict[str, int] = defaultdict(int)
+    for r in data["teacher_section_locks"]:
+        if r["course_id"] not in NON_INSTRUCTIONAL and r["course_id"] != "CONFERENCE":
+            quota_sums[r["teacher_id"]] += int(r.get("num_sections", 0) or 0)
+    total_capacity = sum(quota_sums.values())
+    if total_capacity > 0 and total_sections_needed > total_capacity:
         issues.append({
             "level": "warning",
-            "message": f"Total sections needed ({total_sections_needed}) may exceed teacher capacity ({total_capacity} teaching periods)"
+            "message": f"Total sections needed ({total_sections_needed}) may exceed teacher section quotas ({total_capacity} total)"
         })
 
     return issues
@@ -153,19 +145,21 @@ def validate_schedule(db_path: Path, scenario_id: str, runs_dir: Path) -> list[d
         if len(ps) != len(set(ps)):
             issues.append({"level": "error", "message": f"Teacher {_t(t_id, teacher_map)} has multiple courses in same period"})
 
-    # Check section counts vs max_sections
+    # Check section counts vs section quotas
+    from collections import defaultdict as _dd
+    quota_sums: dict[str, int] = _dd(int)
+    for r in data["teacher_section_locks"]:
+        if r["course_id"] not in NON_INSTRUCTIONAL and r["course_id"] != "CONFERENCE":
+            quota_sums[r["teacher_id"]] += int(r.get("num_sections", 0) or 0)
     for t_id, secs in teacher_sections.items():
-        t = teacher_map.get(t_id)
-        if not t:
-            continue
-        max_s = int(t.get("max_sections", 0) or 0)
-        if max_s == 0:
+        expected = quota_sums.get(t_id, 0)
+        if expected == 0:
             continue
         non_conf = [s for s in secs if s["course_id"] != "CONFERENCE" and s["course_id"] not in NON_INSTRUCTIONAL]
-        if len(non_conf) != max_s:
+        if len(non_conf) != expected:
             issues.append({
                 "level": "warning",
-                "message": f"Teacher {_t(t_id, teacher_map)} has {len(non_conf)} teaching sections (expected {max_s})"
+                "message": f"Teacher {_t(t_id, teacher_map)} has {len(non_conf)} teaching sections (expected {expected} per section quotas)"
             })
 
     return issues

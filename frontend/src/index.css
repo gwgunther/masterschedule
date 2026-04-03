@@ -297,8 +297,7 @@ select.cell-input, select.cell-input-narrow {
   background: #fff; position: sticky; top: 0; z-index: 10;
 }
 
-.schedule-table thead th:first-child,
-.schedule-table thead th:nth-child(2) { text-align: left; }
+.schedule-table thead th:first-child { text-align: left; }
 
 .schedule-table .dept-row td {
   font-family: 'Helvetica Neue', Arial, sans-serif;
@@ -320,7 +319,7 @@ select.cell-input, select.cell-input-narrow {
 .schedule-table tbody td:nth-child(2) { color: #888; font-size: 11px; }
 
 /* ── Course pills ────────────────────────────────────────────────────── */
-.period-cell { padding: 5px 10px !important; }
+.period-cell { padding: 5px 10px 5px 26px !important; position: relative; }
 
 .course-pill {
   display: inline-block;
@@ -388,9 +387,26 @@ select.cell-input, select.cell-input-narrow {
   font-size: 8px; text-transform: uppercase; letter-spacing: 0.06em;
   color: #bbb; margin-bottom: 2px; white-space: nowrap;
 }
-.sum-agg-vals { display: flex; align-items: baseline; gap: 8px; }
+.sum-agg-vals { display: flex; align-items: baseline; justify-content: space-between; }
 .sum-agg-val { font-size: 12px; color: #555; white-space: nowrap; }
 .sum-agg-bold { font-weight: 700; color: #1a1a1a; font-size: 13px; }
+
+/* Sub-header row above the teacher rows — matches main thead style */
+.grid-subheader th {
+  font-family: 'Helvetica Neue', Arial, sans-serif;
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #888;
+  font-weight: 500;
+  padding: 10px 12px;
+  border-bottom: 1px solid #e8e4de;
+  border-top: 2px solid #d0ccc4;
+  text-align: center;
+  white-space: nowrap;
+  background: #faf9f6;
+}
+.grid-subheader th:first-child { text-align: left; }
 
 /* Per-teacher stat columns */
 .teacher-stat-th {
@@ -398,17 +414,23 @@ select.cell-input, select.cell-input-narrow {
   color: #888;
   text-align: right;
   border-left: 1px solid #e0ddd5;
-  padding: 0 10px;
-  white-space: nowrap;
+  padding: 4px 6px;
+  white-space: normal;
+  width: 48px;
+  min-width: 48px;
+  max-width: 48px;
 }
 .teacher-stat-cell {
   text-align: right;
-  padding: 4px 10px;
+  padding: 4px 6px;
   font-family: 'Helvetica Neue', Arial, sans-serif;
   font-size: 11px;
   color: #666;
   border-left: 1px solid #f0ede8;
   white-space: nowrap;
+  width: 48px;
+  min-width: 48px;
+  max-width: 48px;
 }
 .teacher-stat-total {
   font-weight: 600;
@@ -422,6 +444,10 @@ select.cell-input, select.cell-input-narrow {
   display: inline-flex;
   align-items: center;
   gap: 1px;
+  position: absolute;
+  left: 4px;
+  top: 50%;
+  transform: translateY(-50%);
 }
 
 .pill-icon {
@@ -459,6 +485,14 @@ select.cell-input, select.cell-input-narrow {
 .period-cell.grid-locked.lockable:hover {
   background: #dbeafe;
 }
+
+.period-cell.drag-over {
+  background: #dbeafe;
+  outline: 2px dashed #3b82f6;
+  outline-offset: -2px;
+}
+.period-cell[draggable="true"] { cursor: grab; }
+.period-cell[draggable="true"]:active { cursor: grabbing; }
 
 /* Unlock All button */
 .unlock-all-btn {
@@ -592,6 +626,88 @@ select.cell-input, select.cell-input-narrow {
 }
 .qual-tag-remove:hover { color: #9f1239; }
 
+/* ── Course Conflicts grouped card UI ──────────────────────────────────── */
+.conflict-group-card {
+  border: 1px solid #e8e4dc;
+  border-radius: 8px;
+  background: #fff;
+  overflow: visible;
+}
+.conflict-group-header {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 14px;
+  border-bottom: 1px solid #f0ede8;
+  background: #faf9f7;
+  border-radius: 8px 8px 0 0;
+}
+.conflict-group-name {
+  font-family: 'Helvetica Neue', Arial, sans-serif;
+  font-size: 12px; font-weight: 600; color: #1a1a1a;
+  cursor: pointer; padding: 2px 4px; border-radius: 3px;
+}
+.conflict-group-name:hover { background: #f0ede8; }
+.conflict-name-input {
+  font-family: 'Helvetica Neue', Arial, sans-serif;
+  font-size: 12px; font-weight: 600;
+  border: 1px solid #c0bdb6; border-radius: 4px;
+  padding: 2px 6px; outline: none; width: 200px;
+}
+.conflict-rule-select {
+  font-family: 'Helvetica Neue', Arial, sans-serif;
+  font-size: 11px; font-weight: 500; color: #444;
+  border: 1px solid #e0ddd5; border-radius: 5px;
+  padding: 3px 7px; background: #fafaf8; cursor: pointer;
+  outline: none;
+}
+.conflict-rule-select:focus { border-color: #a0a0c0; }
+.conflict-group-body {
+  padding: 10px 14px;
+  display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
+}
+.conflict-course-tag {
+  background: #f0f4ff; border-color: #c7d4f5; color: #3b5bdb;
+}
+
+/* ── Course Grouping ──────────────────────────────────────────────────────── */
+.cg-bracket {
+  width: 6px; padding: 0; background: transparent;
+}
+.cg-bracket-top {
+  background: linear-gradient(to bottom, transparent 50%, #6366f1 50%);
+  border-radius: 3px 0 0 0;
+  border-left: 2px solid #6366f1;
+  border-top: 2px solid #6366f1;
+}
+.cg-bracket-bottom {
+  background: linear-gradient(to top, transparent 50%, #6366f1 50%);
+  border-radius: 0 0 0 3px;
+  border-left: 2px solid #6366f1;
+  border-bottom: 2px solid #6366f1;
+}
+.cg-row.cg-primary td { background: #faf9ff; border-top: 1px solid #e0def8; }
+.cg-row.cg-secondary td { background: #faf9ff; border-bottom: 1px solid #e0def8; }
+.cg-shared-cell {
+  background: #f3f2fd !important;
+  border-left: 1px solid #e0def8;
+  vertical-align: middle;
+}
+/* Group action buttons */
+.cg-action-btn {
+  background: none; border: 1px solid #e0e0e0; border-radius: 4px;
+  cursor: pointer; font-size: 12px; color: #888;
+  padding: 2px 5px; line-height: 1;
+}
+.cg-action-btn:hover { border-color: #aaa; color: #333; background: #f5f5f5; }
+.cg-link-btn { color: #6366f1; border-color: #c7d4f5; }
+.cg-link-btn:hover { background: #f0f4ff; color: #4338ca; }
+.cg-unlink-btn:hover { color: #b91c1c; border-color: #fca5a5; background: #fff1f2; }
+
+/* Read-only "assigned to" tags — muted, no remove button */
+.qual-tag-assigned {
+  background: #f5f5f4; border-color: #d6d3d1; color: #78716c;
+  padding: 2px 7px;
+}
+
 .qual-add-btn {
   font-family: 'Helvetica Neue', Arial, sans-serif;
   font-size: 10px; font-weight: 500; color: #aaa;
@@ -661,6 +777,20 @@ select.cell-input, select.cell-input-narrow {
 .pill-HEALTH           { background: #f0fdfa; border-color: #99f6e4; color: #134e4a; }
 .pill-WORLD_LANGUAGE   { background: #ecfeff; border-color: #a5f3fc; color: #164e63; }
 .pill-ELD              { background: #eef2ff; border-color: #c7d2fe; color: #3730a3; }
+
+/* Department label tags (reuse pill colors) */
+.dept-tag { font-size: 9px; border-radius: 3px; padding: 0 5px; white-space: nowrap; font-family: 'Helvetica Neue', Arial, sans-serif; }
+.dept-tag-MATH             { background: #eff6ff; color: #1e40af; }
+.dept-tag-SCIENCE          { background: #f0fdf4; color: #166534; }
+.dept-tag-ENGLISH          { background: #fdf4ff; color: #6b21a8; }
+.dept-tag-SOCIAL_SCIENCE   { background: #fffbeb; color: #92400e; }
+.dept-tag-PE_HEALTH        { background: #ecfdf5; color: #065f46; }
+.dept-tag-SWD_MILD_MOD     { background: #fff1f2; color: #9f1239; }
+.dept-tag-SWD_MOD_SEV      { background: #fff1f2; color: #9f1239; }
+.dept-tag-CTE              { background: #fff7ed; color: #9a3412; }
+.dept-tag-VAPA             { background: #fdf2f8; color: #86198f; }
+.dept-tag-WORLD_LANGUAGE   { background: #ecfeff; color: #164e63; }
+.dept-tag-RELEASES         { background: #f9f8f3; color: #aaa; }
 
 /* ── Inspector ───────────────────────────────────────────────────────── */
 .inspector-panel {

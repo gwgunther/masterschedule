@@ -3,7 +3,7 @@ import ScheduleGrid from "../components/ScheduleGrid";
 
 import ValidationPanel from "../components/ValidationPanel";
 import DiagnosticsPanel from "../components/DiagnosticsPanel";
-import { fetchSchedule, fetchTable, fetchContext, fetchProjectSettings, toggleGridLock, clearGridLocks } from "../api";
+import { fetchSchedule, fetchTable, fetchContext, fetchProjectSettings, toggleGridLock, clearGridLocks, swapGridLock } from "../api";
 import type { Section, DiagnosticGroup } from "../api";
 
 interface Teacher {
@@ -28,15 +28,66 @@ export default function SchedulePage({ activeTab, scheduleVersion, diagnostics, 
   const [fixedKeys, setFixedKeys] = useState<Set<string>>(new Set());
   const [gridLockedKeys, setGridLockedKeys] = useState<Set<string>>(new Set());
   const [coteachKeys, setCoteachKeys] = useState<Set<string>>(new Set());
+  // Full coteach pairs: "teacher_id|course_id" → { partnerTeacher, partnerCourse }
+  const [coteachPairs, setCoteachPairs] = useState<Map<string, { partnerTeacher: string; partnerCourse: string }>>(new Map());
   const [courseNames, setCourseNames] = useState<Map<string, string>>(new Map());
   const [courseEnrollment, setCourseEnrollment] = useState<Map<string, { enrollment_7th: number; enrollment_8th: number }>>(new Map());
   const [totalStudents, setTotalStudents] = useState<{ grade7: number; grade8: number } | undefined>();
+
+  // Derive period-specific co-teach keys from actual schedule data
+  // key: "teacher_id|course_id|period" — only periods where the partner also appears in the same period
+  useEffect(() => {
+    if (sections.length === 0 || coteachPairs.size === 0) { setCoteachKeys(new Set()); return; }
+    // Build set of all "teacher|course|period" triples in the schedule
+    const scheduleTriples = new Set<string>(sections.map(s => `${s.teacher_id}|${s.course_id}|${s.period}`));
+    const keys = new Set<string>();
+    for (const s of sections) {
+      const pairKey = `${s.teacher_id}|${s.course_id}`;
+      const partner = coteachPairs.get(pairKey);
+      if (!partner) continue;
+      // Check if partner has a section in the same period
+      if (scheduleTriples.has(`${partner.partnerTeacher}|${partner.partnerCourse}|${s.period}`)) {
+        keys.add(`${s.teacher_id}|${s.course_id}|${s.period}`);
+      }
+    }
+    setCoteachKeys(keys);
+  }, [sections, coteachPairs]);
 
   const showingBestAttempt = hasBestAttempt && (diagnostics?.length ?? 0) > 0;
   const hasDiagnostics = diagnostics && diagnostics.length > 0;
 
   const handleToggleLock = async (teacher_id: string, course_id: string, period: number) => {
     const result = await toggleGridLock(teacher_id, course_id, period);
+    setFixedKeys(new Set(result.fixedKeys));
+    setGridLockedKeys(new Set(result.gridLockedKeys));
+  };
+
+  const handleSwap = async (teacher_id: string, course_a: string, period_a: number, course_b: string, period_b: number) => {
+    // Find co-teach partners for both cells (if any)
+    const partnerA = coteachPairs.get(`${teacher_id}|${course_a}`);
+    const partnerB = coteachPairs.get(`${teacher_id}|${course_b}`);
+
+    // Optimistic update — swap this teacher's sections
+    setSections(prev => prev.map(s => {
+      if (s.teacher_id === teacher_id) {
+        if (s.course_id === course_a && s.period === period_a) return { ...s, period: period_b };
+        if (s.course_id === course_b && s.period === period_b) return { ...s, period: period_a };
+      }
+      // Also swap co-teach partners
+      if (partnerA && s.teacher_id === partnerA.partnerTeacher && s.course_id === partnerA.partnerCourse && s.period === period_a) {
+        return { ...s, period: period_b };
+      }
+      if (partnerB && s.teacher_id === partnerB.partnerTeacher && s.course_id === partnerB.partnerCourse && s.period === period_b) {
+        return { ...s, period: period_a };
+      }
+      return s;
+    }));
+
+    // API calls — swap this teacher, then partners if needed
+    let result = await swapGridLock(teacher_id, course_a, period_a, course_b, period_b);
+    if (partnerA) {
+      result = await swapGridLock(partnerA.partnerTeacher, partnerA.partnerCourse, period_a, partnerB?.partnerCourse ?? partnerA.partnerCourse, period_b);
+    }
     setFixedKeys(new Set(result.fixedKeys));
     setGridLockedKeys(new Set(result.gridLockedKeys));
   };
@@ -56,7 +107,23 @@ export default function SchedulePage({ activeTab, scheduleVersion, diagnostics, 
   // Load schedule data + reference data on mount and when solver finishes
   useEffect(() => {
     loadSchedule();
-    fetchTable("teachers").then(rows => setTeachers(rows as unknown as Teacher[]));
+    // Load teachers + section locks, then derive max_sections from quotas
+    Promise.all([
+      fetchTable("teachers"),
+      fetchTable("teacher_section_locks"),
+    ]).then(([teacherRows, lockRows]) => {
+      const quotaSums = new Map<string, number>();
+      for (const r of lockRows) {
+        if (r.course_id === "CONFERENCE") continue;
+        const t = String(r.teacher_id);
+        quotaSums.set(t, (quotaSums.get(t) ?? 0) + (Number(r.num_sections) || 0));
+      }
+      const derived = (teacherRows as unknown as Teacher[]).map(t => ({
+        ...t,
+        max_sections: quotaSums.get(t.teacher_id) ?? 0,
+      }));
+      setTeachers(derived);
+    });
     fetchTable("courses").then(rows => {
       const map = new Map<string, string>();
       const enr = new Map<string, { enrollment_7th: number; enrollment_8th: number }>();
@@ -91,12 +158,14 @@ export default function SchedulePage({ activeTab, scheduleVersion, diagnostics, 
       setGridLockedKeys(gridKeys);
     });
     fetchTable("coteaching_combinations").then(rows => {
-      const keys = new Set<string>();
+      const pairs = new Map<string, { partnerTeacher: string; partnerCourse: string }>();
       for (const r of rows) {
-        keys.add(`${r.sped_teacher}|${r.coteach_id}`);
-        keys.add(`${r.gened_teacher}|${r.gened_course}`);
+        const genKey = `${r.gened_teacher}|${r.gened_course_code}`;
+        const swdKey = `${r.swd_teacher}|${r.swd_course_code}`;
+        pairs.set(genKey, { partnerTeacher: String(r.swd_teacher), partnerCourse: String(r.swd_course_code) });
+        pairs.set(swdKey, { partnerTeacher: String(r.gened_teacher), partnerCourse: String(r.gened_course_code) });
       }
-      setCoteachKeys(keys);
+      setCoteachPairs(pairs);
     });
   }, [loadSchedule, scheduleVersion]);
 
@@ -152,6 +221,8 @@ export default function SchedulePage({ activeTab, scheduleVersion, diagnostics, 
                 courseEnrollment={courseEnrollment}
                 totalStudents={totalStudents}
                 onToggleLock={handleToggleLock}
+                onSwap={handleSwap}
+                coteachPairs={coteachPairs}
               />
             </>
           )}

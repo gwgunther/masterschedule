@@ -1,3 +1,4 @@
+import { useRef, useState } from "react";
 import type { Section } from "../api";
 
 interface Teacher {
@@ -20,6 +21,8 @@ interface Props {
   /** Total unique students per grade (not course-enrollment sums) */
   totalStudents?: { grade7: number; grade8: number };
   onToggleLock?: (teacher_id: string, course_id: string, period: number) => void;
+  onSwap?: (teacher_id: string, course_a: string, period_a: number, course_b: string, period_b: number) => void;
+  coteachPairs?: Map<string, { partnerTeacher: string; partnerCourse: string }>;
 }
 
 const PERIODS = [1, 2, 3, 4, 5, 6, 7];
@@ -27,14 +30,26 @@ const NON_INSTR = new Set(["CONFERENCE", "PROGRESS", "PROGRESSMON", "TITLE1", "C
 
 function pillClass(dept: string, isConf: boolean): string {
   if (isConf) return "course-pill pill-conf";
-  const key = dept.replace(/ /g, "_");
+  // Normalize: spaces → _, slashes → _, then map known variants
+  const raw = dept.replace(/[ /]/g, "_").toUpperCase();
+  const keyMap: Record<string, string> = {
+    "PE_HEALTH": "PE",
+    "PE": "PE",
+    "SWD_MILD_MOD": "SPED",
+    "SWD_MOD_SEV": "SPED",
+    "SPED": "SPED",
+    "SOCIAL_SCIENCE": "SOCIAL_SCIENCE",
+    "WORLD_LANGUAGE": "WORLD_LANGUAGE",
+  };
+  const key = keyMap[raw] ?? raw;
   return `course-pill pill-${key}`;
 }
 
 function deptAbbrev(dept: string): string {
   const map: Record<string, string> = {
     "ENGLISH": "ENG", "MATH": "MATH", "SCIENCE": "SCI", "SOCIAL SCIENCE": "SOC",
-    "CTE": "CTE", "PE/HEALTH": "PE", "VAPA": "VAPA", "WORLD LANGUAGE": "LANG", "SPED": "SPED",
+    "CTE": "CTE", "PE/HEALTH": "PE", "VAPA": "VAPA", "WORLD LANGUAGE": "LANG",
+    "SPED": "SPED", "SWD_MILD_MOD": "SWD", "SWD_MOD_SEV": "SWD",
   };
   return map[dept] ?? dept.slice(0, 4);
 }
@@ -47,7 +62,9 @@ function courseLabel(courseId: string, courseNames?: Map<string, string>): strin
 function sign(n: number) { return n > 0 ? "+" : ""; }
 function netCls(n: number) { return n > 0 ? "summary-pos" : n < 0 ? "summary-neg" : ""; }
 
-export default function ScheduleGrid({ sections, teachers, onSelectTeacher, selectedTeacherId, fixedKeys, gridLockedKeys, coteachKeys, courseNames, totalStudents, onToggleLock }: Props) {
+export default function ScheduleGrid({ sections, teachers, onSelectTeacher, selectedTeacherId, fixedKeys, gridLockedKeys, coteachKeys, courseNames, totalStudents, onToggleLock, onSwap, coteachPairs }: Props) {
+  const dragSrc = useRef<{ teacher_id: string; course_id: string; period: number } | null>(null);
+  const [dragOverKey, setDragOverKey] = useState<string | null>(null);
   // lookup: teacher_id → period → Section
   const lookup = new Map<string, Map<number, Section>>();
   for (const s of sections) {
@@ -104,12 +121,9 @@ export default function ScheduleGrid({ sections, teachers, onSelectTeacher, sele
         <table className="schedule-table">
           <thead>
             <tr>
-              <th style={{ textAlign: "left" }}>Teacher</th>
+              <th />
               {PERIODS.map(p => <th key={p}>P{p}</th>)}
-              <th className="teacher-stat-th">Sections</th>
-              <th className="teacher-stat-th">7th Seats</th>
-              <th className="teacher-stat-th">8th Seats</th>
-              <th className="teacher-stat-th">Total</th>
+              <th colSpan={4} style={{ background: "transparent", border: "none" }} />
             </tr>
           </thead>
 
@@ -202,6 +216,15 @@ export default function ScheduleGrid({ sections, teachers, onSelectTeacher, sele
           )}
 
           <tbody>
+            {/* Sub-header row: stat column labels aligned with grid */}
+            <tr className="grid-subheader">
+              <th style={{ textAlign: "left" }}>Teacher</th>
+              {PERIODS.map(p => <th key={p}>P{p}</th>)}
+              <th className="teacher-stat-th">Sect</th>
+              <th className="teacher-stat-th">7th</th>
+              <th className="teacher-stat-th">8th</th>
+              <th className="teacher-stat-th">Total</th>
+            </tr>
             {depts.map(dept => (
               <>
                 <tr key={`dept-${dept}`} className="dept-row">
@@ -225,7 +248,6 @@ export default function ScheduleGrid({ sections, teachers, onSelectTeacher, sele
                       <td>
                         <span style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
                           <span>{teacher.full_name || teacher.teacher_id}</span>
-                          <span className="dept-badge">{deptAbbrev(teacher.department)}</span>
                         </span>
                       </td>
                       {PERIODS.map(p => {
@@ -237,16 +259,48 @@ export default function ScheduleGrid({ sections, teachers, onSelectTeacher, sele
                         const key = `${sec.teacher_id}|${sec.course_id}|${sec.period}`;
                         const isDataLocked = fixedKeys?.has(key) && !gridLockedKeys?.has(key);
                         const isGridLocked = gridLockedKeys?.has(key);
-                        const isCoteach = coteachKeys?.has(`${sec.teacher_id}|${sec.course_id}`);
+                        const isCoteach = coteachKeys?.has(`${sec.teacher_id}|${sec.course_id}|${sec.period}`);
                         const isLockable = !!onToggleLock && !isDataLocked;
+                        const dragKey = `${teacher.teacher_id}|${p}`;
+                        const isDragOver = dragOverKey === dragKey;
                         return (
                           <td
                             key={p}
-                            className={`period-cell${isGridLocked ? " grid-locked" : ""}${isLockable ? " lockable" : ""}`}
+                            className={`period-cell${isGridLocked ? " grid-locked" : ""}${isLockable ? " lockable" : ""}${isDragOver ? " drag-over" : ""}`}
                             onClick={isLockable ? (e) => { e.stopPropagation(); onToggleLock(sec.teacher_id, sec.course_id, sec.period); } : undefined}
-                            title={isDataLocked ? "Locked in data table" : isGridLocked ? "Click to unlock" : isLockable ? "Click to lock" : undefined}
+                            title={isDataLocked ? "Locked in data table" : isGridLocked ? "Click to unlock" : isCoteach ? "Co-taught — drags with partner" : isLockable ? "Click to lock" : undefined}
+                            draggable={!!onSwap}
+                            onDragStart={onSwap ? (e) => {
+                              dragSrc.current = { teacher_id: teacher.teacher_id, course_id: sec.course_id, period: p };
+                              e.dataTransfer.effectAllowed = "move";
+                            } : undefined}
+                            onDragOver={onSwap ? (e) => {
+                              if (dragSrc.current && dragSrc.current.teacher_id === teacher.teacher_id && dragSrc.current.period !== p) {
+                                e.preventDefault();
+                                e.dataTransfer.dropEffect = "move";
+                                setDragOverKey(dragKey);
+                              }
+                            } : undefined}
+                            onDragLeave={onSwap ? () => setDragOverKey(null) : undefined}
+                            onDragEnd={onSwap ? () => { dragSrc.current = null; setDragOverKey(null); } : undefined}
+                            onDrop={onSwap ? (e) => {
+                              e.preventDefault();
+                              setDragOverKey(null);
+                              const src = dragSrc.current;
+                              if (src && src.teacher_id === teacher.teacher_id && src.period !== p) {
+                                onSwap(teacher.teacher_id, src.course_id, src.period, sec.course_id, p);
+                              }
+                              dragSrc.current = null;
+                            } : undefined}
                           >
                             <span className="period-cell-inner">
+                              {(isDataLocked || isGridLocked || isCoteach) && (
+                                <span className="pill-icons">
+                                  {isDataLocked && <LockIcon className="pill-icon-data" />}
+                                  {isGridLocked && <GridLockIcon />}
+                                  {isCoteach && <CoteachIcon />}
+                                </span>
+                              )}
                               <span className={pillClass(teacher.department, isConf)}>
                                 {isConf ? "Conference" : courseLabel(sec.course_id, courseNames)}
                               </span>
@@ -255,13 +309,6 @@ export default function ScheduleGrid({ sections, teachers, onSelectTeacher, sele
                                   {sec.students_7th != null && sec.students_8th != null
                                     ? <><span className="pill-grade-label">7</span>{sec.students_7th}<span className="pill-grade-sep"> · </span><span className="pill-grade-label">8</span>{sec.students_8th}</>
                                     : `${sec.total_students}`}
-                                </span>
-                              )}
-                              {(isDataLocked || isGridLocked || isCoteach) && (
-                                <span className="pill-icons">
-                                  {isDataLocked && <LockIcon className="pill-icon-data" />}
-                                  {isGridLocked && <GridLockIcon />}
-                                  {isCoteach && <CoteachIcon />}
                                 </span>
                               )}
                             </span>

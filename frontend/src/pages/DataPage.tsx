@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import EditableTable from "../components/EditableTable";
-import TeacherQualificationsTable from "../components/TeacherQualificationsTable";
 import CourseQualificationsTable from "../components/CourseQualificationsTable";
+import CourseConflictsTable from "../components/CourseConflictsTable";
 import { fetchTable, downloadTableCsv } from "../api";
 import type { TableName } from "../api";
 
@@ -25,6 +25,8 @@ interface TableDef {
   narrowColumns?: string[];
   columnLabels?: Record<string, string>;
   groupByColumn?: string;
+  sortableColumns?: string[];
+  flexColumns?: string[];
 }
 
 const PERIOD_OPTIONS: RefOption[] = [1, 2, 3, 4, 5, 6, 7].map(p => ({ value: String(p), label: `P${p}` }));
@@ -35,14 +37,18 @@ const TABLES: TableDef[] = [
     name: "courses",
     label: "Courses",
     columns: ["course_id", "course_title", "enrollment_7th", "enrollment_8th", "total_enrollment", "num_sections", "max_class_size", "status", "notes"],
-    computedColumns: ["status"],
-    fixedOptions: { num_sections: SECTION_COUNT_OPTIONS },
+    computedColumns: ["status", "num_sections"],
+    fixedOptions: {},
     narrowColumns: ["enrollment_7th", "enrollment_8th", "total_enrollment", "num_sections", "max_class_size"],
   },
   {
     name: "teachers",
     label: "Teachers",
-    columns: ["teacher_id", "full_name", "department", "max_sections"],
+    columns: ["teacher_id", "full_name", "max_sections", "assigned_to", "department", "notes"],
+    computedColumns: ["department", "max_sections", "assigned_to"],
+    narrowColumns: ["max_sections"],
+    columnLabels: { "max_sections": "sections" },
+    flexColumns: ["assigned_to", "department", "notes"],
   },
   {
     name: "departments",
@@ -57,15 +63,19 @@ const TABLES: TableDef[] = [
     courseCols: ["course_id"],
     fixedOptions: { num_sections: SECTION_COUNT_OPTIONS },
     columnLabels: { teacher_id: "Teacher", course_id: "Course", num_sections: "Sections" },
+    sortableColumns: ["teacher_id", "course_id"],
   },
   {
     name: "fixed_assignments",
     label: "Fixed Assignments",
-    columns: ["teacher_id", "course_id", "period"],
+    columns: ["teacher_id", "course_id", "period", "source", "notes"],
     teacherCols: ["teacher_id"],
     courseCols: ["course_id"],
     fixedOptions: { period: PERIOD_OPTIONS },
-    columnLabels: { teacher_id: "Teacher", course_id: "Course" },
+    computedColumns: ["source"],
+    narrowColumns: ["source"],
+    columnLabels: { teacher_id: "Teacher", course_id: "Course", source: "" },
+    sortableColumns: ["teacher_id", "course_id", "period"],
   },
   {
     name: "coteaching_combinations",
@@ -151,10 +161,10 @@ export default function DataPage({ activeTable }: Props) {
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", padding: "20px 40px", overflow: "hidden" }}>
       <div style={{ flex: 1, minHeight: 0 }}>
-        {activeTable === "teachers" ? (
-          <TeacherQualificationsTable courseOptions={courseOptions} deptOptions={deptOptions} onExport={() => downloadTableCsv("teachers")} />
-        ) : activeTable === "courses" ? (
-          <CourseQualificationsTable teacherOptions={teacherOptions} onExport={() => downloadTableCsv("courses")} />
+        {activeTable === "courses" ? (
+          <CourseQualificationsTable onExport={() => downloadTableCsv("courses")} />
+        ) : activeTable === "course_conflicts" ? (
+          <CourseConflictsTable courseOptions={courseOptions} onExport={() => downloadTableCsv("course_conflicts")} />
         ) : (
           <EditableTable
             key={activeTable}
@@ -167,6 +177,8 @@ export default function DataPage({ activeTable }: Props) {
             refColumns={refColumns}
             columnLabels={tableDef.columnLabels}
             groupByColumn={tableDef.groupByColumn}
+            sortableColumns={tableDef.sortableColumns}
+            flexColumns={tableDef.flexColumns}
             searchable
             onExport={() => downloadTableCsv(tableDef.name)}
           />

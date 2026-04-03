@@ -201,3 +201,26 @@ def import_scenario_csv(project_slug: str, scenario_slug: str, table: str, csv_c
     rows = list(reader)
     db = project_db_path(project_slug)
     data_io.write_table(db, table, scenario_slug, rows)
+
+
+def import_scenario_zip(project_slug: str, name: str, zip_bytes: bytes, description: str = "") -> dict:
+    """Create a new scenario from a ZIP of CSV files."""
+    import csv as csv_mod
+    import io
+    import zipfile
+
+    scenario = create_scenario(project_slug, name, description=description)
+    db = project_db_path(project_slug)
+
+    with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
+        for table in data_io.TABLES:
+            filename = f"{table}.csv"
+            if filename not in zf.namelist():
+                continue
+            csv_content = zf.read(filename).decode("utf-8")
+            reader = csv_mod.DictReader(io.StringIO(csv_content))
+            rows = list(reader)
+            if rows:
+                data_io.write_table(db, table, scenario["slug"], rows)
+
+    return scenario
