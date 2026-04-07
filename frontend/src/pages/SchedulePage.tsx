@@ -30,6 +30,8 @@ export default function SchedulePage({ activeTab, scheduleVersion, diagnostics, 
   const [coteachKeys, setCoteachKeys] = useState<Set<string>>(new Set());
   // Full coteach pairs: "teacher_id|course_id" → { partnerTeacher, partnerCourse }
   const [coteachPairs, setCoteachPairs] = useState<Map<string, { partnerTeacher: string; partnerCourse: string }>>(new Map());
+  // semesterPairs: "teacher_id|course_id" → partnerTeacherId (same course_id)
+  const [semesterPairs, setSemesterPairs] = useState<Map<string, string>>(new Map());
   const [courseNames, setCourseNames] = useState<Map<string, string>>(new Map());
   const [courseEnrollment, setCourseEnrollment] = useState<Map<string, { enrollment_7th: number; enrollment_8th: number }>>(new Map());
   const [totalStudents, setTotalStudents] = useState<{ grade7: number; grade8: number } | undefined>();
@@ -66,6 +68,9 @@ export default function SchedulePage({ activeTab, scheduleVersion, diagnostics, 
     // Find co-teach partners for both cells (if any)
     const partnerA = coteachPairs.get(`${teacher_id}|${course_a}`);
     const partnerB = coteachPairs.get(`${teacher_id}|${course_b}`);
+    // Find semester pair partners (same course_id, different teacher)
+    const semPartnerA = semesterPairs.get(`${teacher_id}|${course_a}`);
+    const semPartnerB = semesterPairs.get(`${teacher_id}|${course_b}`);
 
     // Optimistic update — swap this teacher's sections
     setSections(prev => prev.map(s => {
@@ -80,6 +85,13 @@ export default function SchedulePage({ activeTab, scheduleVersion, diagnostics, 
       if (partnerB && s.teacher_id === partnerB.partnerTeacher && s.course_id === partnerB.partnerCourse && s.period === period_b) {
         return { ...s, period: period_a };
       }
+      // Also swap semester pair partners (same course, different teacher)
+      if (semPartnerA && s.teacher_id === semPartnerA && s.course_id === course_a && s.period === period_a) {
+        return { ...s, period: period_b };
+      }
+      if (semPartnerB && s.teacher_id === semPartnerB && s.course_id === course_b && s.period === period_b) {
+        return { ...s, period: period_a };
+      }
       return s;
     }));
 
@@ -87,6 +99,9 @@ export default function SchedulePage({ activeTab, scheduleVersion, diagnostics, 
     let result = await swapGridLock(teacher_id, course_a, period_a, course_b, period_b);
     if (partnerA) {
       result = await swapGridLock(partnerA.partnerTeacher, partnerA.partnerCourse, period_a, partnerB?.partnerCourse ?? partnerA.partnerCourse, period_b);
+    }
+    if (semPartnerA) {
+      result = await swapGridLock(semPartnerA, course_a, period_a, semPartnerB ? course_b : course_a, period_b);
     }
     setFixedKeys(new Set(result.fixedKeys));
     setGridLockedKeys(new Set(result.gridLockedKeys));
@@ -157,6 +172,17 @@ export default function SchedulePage({ activeTab, scheduleVersion, diagnostics, 
       setFixedKeys(allKeys);
       setGridLockedKeys(gridKeys);
     });
+    fetchTable("semester_pairs").then(rows => {
+      const map = new Map<string, string>();
+      for (const r of rows) {
+        const cid = String(r.course_id ?? "");
+        if (r.teacher_a && r.teacher_b) {
+          map.set(`${r.teacher_a}|${cid}`, String(r.teacher_b));
+          map.set(`${r.teacher_b}|${cid}`, String(r.teacher_a));
+        }
+      }
+      setSemesterPairs(map);
+    });
     fetchTable("coteaching_combinations").then(rows => {
       const pairs = new Map<string, { partnerTeacher: string; partnerCourse: string }>();
       for (const r of rows) {
@@ -217,6 +243,7 @@ export default function SchedulePage({ activeTab, scheduleVersion, diagnostics, 
                 fixedKeys={fixedKeys}
                 gridLockedKeys={gridLockedKeys}
                 coteachKeys={coteachKeys}
+                semesterPairs={semesterPairs}
                 courseNames={courseNames}
                 courseEnrollment={courseEnrollment}
                 totalStudents={totalStudents}

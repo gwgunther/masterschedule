@@ -40,7 +40,7 @@ def _load_data(data_dir: Path) -> dict:
     df_locks = pd.read_csv(data_dir / "teacher_section_locks.csv").dropna(subset=["teacher_id", "course_id", "num_sections"])
     df_constraints = pd.read_csv(data_dir / "fixed_assignments.csv").dropna(subset=["teacher_id", "course_id", "period"])
     df_coteach = pd.read_csv(data_dir / "coteaching_combinations.csv").dropna(subset=["swd_teacher", "swd_course_code", "gened_teacher", "gened_course_code", "num_sections"])
-    df_pairs = pd.read_csv(data_dir / "semester_pairs.csv").dropna(subset=["course_a", "teacher_a", "course_b", "teacher_b"])
+    df_pairs = pd.read_csv(data_dir / "semester_pairs.csv").dropna(subset=["course_id", "teacher_a", "teacher_b"])
     df_conflicts = pd.read_csv(data_dir / "course_conflicts.csv").dropna(subset=["group_name", "course_id"])
 
     for col in ("enrollment_7th", "enrollment_8th", "total_enrollment", "num_sections"):
@@ -88,8 +88,7 @@ def _load_data(data_dir: Path) -> dict:
 
     pairs: list[tuple] = []
     for _, row in df_pairs.iterrows():
-        pairs.append((str(row["course_a"]), str(row["teacher_a"]),
-                      str(row["course_b"]), str(row["teacher_b"])))
+        pairs.append((str(row["course_id"]), str(row["teacher_a"]), str(row["teacher_b"])))
 
     # Course conflict groups from course_conflicts table
     # Hard groups store {name: {"courses": [...], "max_per_period": int}}
@@ -415,24 +414,24 @@ def _build_problem(data: dict, elastic: bool = False):
             ), f"coteach_count_{co_c}_{co_t}"
 
     # 10. Semester pairs
-    for ca, ta, cb, tb in pairs:
+    for c, ta, tb in pairs:
         if not all(e in teachers for e in (ta, tb)):
             continue
-        if not all(e in courses for e in (ca, cb)):
+        if c not in courses:
             continue
         for p in periods:
             if elastic:
-                sp = pulp.LpVariable(f"s_pair_p_{ca}_{ta}_{cb}_{tb}_{p}", lowBound=0, cat="Binary")
-                sn = pulp.LpVariable(f"s_pair_n_{ca}_{ta}_{cb}_{tb}_{p}", lowBound=0, cat="Binary")
+                sp = pulp.LpVariable(f"s_pair_p_{c}_{ta}_{tb}_{p}", lowBound=0, cat="Binary")
+                sn = pulp.LpVariable(f"s_pair_n_{c}_{ta}_{tb}_{p}", lowBound=0, cat="Binary")
                 prob += (
-                    x[ta, ca, p] + sn - sp == x[tb, cb, p]
-                ), f"pair_{ca}_{ta}_{cb}_{tb}_{p}"
-                slacks["semester_pairs"][f"{ca}|{ta}|{cb}|{tb}|P{p}"] = [sp, sn]
+                    x[ta, c, p] + sn - sp == x[tb, c, p]
+                ), f"pair_{c}_{ta}_{tb}_{p}"
+                slacks["semester_pairs"][f"{c}|{ta}|{tb}|P{p}"] = [sp, sn]
                 slack_penalty += PENALTY * (sp + sn)
             else:
                 prob += (
-                    x[ta, ca, p] == x[tb, cb, p]
-                ), f"pair_{ca}_{ta}_{cb}_{tb}_{p}"
+                    x[ta, c, p] == x[tb, c, p]
+                ), f"pair_{c}_{ta}_{tb}_{p}"
 
     # 11. Course conflict groups — hard (at most max_per_period sections from group per period)
     for grp, info in conflict_groups_hard.items():
@@ -633,13 +632,12 @@ def _format_violation(group: str, label: str, slack_val: float, data: dict) -> d
 
     elif group == "semester_pairs":
         parts = label.split("|")
-        ca, ta, cb, tb = parts[0], parts[1], parts[2], parts[3]
+        c, ta, tb = parts[0], parts[1], parts[2]
         ta_name = teacher_names.get(ta, ta)
         tb_name = teacher_names.get(tb, tb)
-        ca_name = course_names.get(ca, ca)
-        cb_name = course_names.get(cb, cb)
-        detail["message"] = f"{ta_name}/{ca_name} and {tb_name}/{cb_name} must share {parts[4]} — cannot sync"
-        detail["context"] = "Semester-paired courses must be taught same period by their respective teachers"
+        c_name = course_names.get(c, c)
+        detail["message"] = f"{ta_name} and {tb_name} ({c_name}) must share {parts[3]} — cannot sync"
+        detail["context"] = "Semester-paired teachers must teach this course in the same periods"
 
     elif group == "conflict_hard":
         parts = label.split("|")

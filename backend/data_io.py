@@ -92,8 +92,7 @@ _SCHEMAS: dict[str, list[tuple[str, str]]] = {
     ],
     "semester_pairs": [
         ("scenario_id", "TEXT"),
-        ("course_a", "TEXT"),
-        ("course_b", "TEXT"),
+        ("course_id", "TEXT"),
         ("teacher_a", "TEXT"),
         ("teacher_b", "TEXT"),
         ("notes", "TEXT"),
@@ -131,6 +130,11 @@ def init_db(db_path: Path) -> None:
         for table, cols in _SCHEMAS.items():
             col_defs = ", ".join(f'"{c}" {t}' for c, t in cols)
             con.execute(f'CREATE TABLE IF NOT EXISTS "{table}" ({col_defs})')
+        # Migrate semester_pairs: rename course_a → course_id, drop course_b
+        existing = {r[1] for r in con.execute('PRAGMA table_info("semester_pairs")')}
+        if "course_a" in existing and "course_id" not in existing:
+            con.execute('ALTER TABLE "semester_pairs" ADD COLUMN "course_id" TEXT')
+            con.execute('UPDATE "semester_pairs" SET "course_id" = "course_a"')
         con.commit()
 
 
@@ -152,8 +156,9 @@ def read_table(db_path: Path, table: str, scenario_id: str) -> list[dict]:
         rows = con.execute(
             f'SELECT * FROM "{table}" WHERE scenario_id = ?', (scenario_id,)
         ).fetchall()
-    # Strip scenario_id from results — callers don't need it
-    return [{k: v for k, v in dict(r).items() if k != "scenario_id"} for r in rows]
+    # Strip scenario_id and any legacy columns not in current schema
+    schema_cols = {c for c, _ in _SCHEMAS.get(table, [])} - {"scenario_id"}
+    return [{k: v for k, v in dict(r).items() if k != "scenario_id" and (not schema_cols or k in schema_cols)} for r in rows]
 
 
 def write_table(db_path: Path, table: str, scenario_id: str, rows: list[dict]) -> None:
@@ -169,10 +174,14 @@ def write_table(db_path: Path, table: str, scenario_id: str, rows: list[dict]) -
             con.commit()
             return
 
-        # Normalise: drop computed columns, inject scenario_id
+        # Normalise: drop computed columns, inject scenario_id, skip blank rows
+        schema_keys = {c for c, _ in _SCHEMAS.get(table, [])} - {"scenario_id", "notes"}
         clean = []
         for r in rows:
             row = {k: (None if v == "" else v) for k, v in r.items() if k != "scenario_id"}
+            # Skip rows where all non-notes schema fields are null/empty
+            if schema_keys and all(row.get(k) is None for k in schema_keys if k in row):
+                continue
             row["scenario_id"] = scenario_id
             clean.append(row)
 

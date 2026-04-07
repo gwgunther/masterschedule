@@ -431,14 +431,28 @@ export default function CourseQualificationsTable({ onExport }: Props) {
                   (!linkSearch.trim() || c.course_title?.toLowerCase().includes(linkSearch.toLowerCase()) || c.course_id.toLowerCase().includes(linkSearch.toLowerCase()))
                 );
 
+                const NON_INSTR = new Set(["CONFERENCE", "PROGRESS", "PROGRESSMON", "TITLE1", "COMMUNITY", "COMSCHOOLS", "5CS", "ASB", "ASBRELEASE", "REWARDS", "DLI"]);
+                const totalEnrollment = Number(course.total_enrollment) || Number(course.enrollment_7th) || Number(course.enrollment_8th) || 0;
+                const isUnassigned = !NON_INSTR.has(course.course_id) && totalEnrollment > 0 && !isSecondary && (lockMap.get(course.course_id) ?? []).length === 0;
+
                 const rowClass = groupPair
                   ? (isPrimary ? "cg-row cg-primary" : "cg-row cg-secondary")
                   : "";
 
                 return (
-                  <tr key={originalIdx} className={rowClass}>
-                    {/* Group bracket column */}
-                    <td className={groupPair ? (isPrimary ? "cg-bracket cg-bracket-top" : "cg-bracket cg-bracket-bottom") : "cg-bracket"} />
+                  <tr key={originalIdx} className={rowClass} style={isUnassigned ? { background: "#fffbeb" } : undefined}>
+                    {/* Group bracket / unassigned indicator column */}
+                    <td className={groupPair ? (isPrimary ? "cg-bracket cg-bracket-top" : "cg-bracket cg-bracket-bottom") : "cg-bracket"}
+                      style={{ position: "relative" }}>
+                      {isUnassigned && (
+                        <span title="No teacher assigned in Section Quotas" style={{
+                          position: "absolute", left: "50%", top: "50%",
+                          transform: "translate(-50%, -50%)",
+                          width: 6, height: 6, borderRadius: "50%",
+                          background: "#f59e0b", display: "block",
+                        }} />
+                      )}
+                    </td>
 
                     <td style={{ whiteSpace: "nowrap" }}>
                       <input className="cell-input" value={course.course_id}
@@ -508,6 +522,11 @@ export default function CourseQualificationsTable({ onExport }: Props) {
                     {/* Assigned teachers from section locks (read-only) */}
                     <td>
                       <div style={{ display: "flex", flexWrap: "wrap", gap: 3, padding: "2px 0" }}>
+                        {isUnassigned && (
+                          <span style={{ fontSize: 10, fontFamily: "'Helvetica Neue', Arial, sans-serif", color: "#b45309", fontStyle: "italic" }}>
+                            unassigned in Section Quotas
+                          </span>
+                        )}
                         {(lockMap.get(course.course_id) ?? []).map(({ teacher_id, num_sections }) => (
                           <span key={teacher_id} style={{
                             fontSize: 10, fontFamily: "'Helvetica Neue', Arial, sans-serif",

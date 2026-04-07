@@ -99,10 +99,9 @@ def validate_data(db_path: Path, scenario_id: str) -> list[dict]:
             val = r.get(key, "")
             if val and val not in teachers:
                 issues.append({"level": "error", "message": f"semester_pairs: unknown teacher '{val}'"})
-        for key in ("course_a", "course_b"):
-            val = r.get(key, "")
-            if val and val not in courses:
-                issues.append({"level": "error", "message": f"semester_pairs: unknown course '{val}'"})
+        val = r.get("course_id", "")
+        if val and val not in courses:
+            issues.append({"level": "error", "message": f"semester_pairs: unknown course '{val}'"})
 
     # Section budget check
     from collections import defaultdict

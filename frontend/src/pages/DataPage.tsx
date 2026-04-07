@@ -96,10 +96,10 @@ const TABLES: TableDef[] = [
   {
     name: "semester_pairs",
     label: "Semester Pairs",
-    columns: ["course_a", "teacher_a", "course_b", "teacher_b", "notes"],
+    columns: ["course_id", "teacher_a", "teacher_b", "notes"],
     teacherCols: ["teacher_a", "teacher_b"],
-    courseCols: ["course_a", "course_b"],
-    columnLabels: { course_a: "Course A", teacher_a: "Teacher A", course_b: "Course B", teacher_b: "Teacher B" },
+    courseCols: ["course_id"],
+    columnLabels: { course_id: "Course", teacher_a: "Teacher A", teacher_b: "Teacher B" },
   },
   {
     name: "course_conflicts",

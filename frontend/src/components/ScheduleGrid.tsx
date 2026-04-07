@@ -16,6 +16,8 @@ interface Props {
   fixedKeys?: Set<string>;
   gridLockedKeys?: Set<string>;
   coteachKeys?: Set<string>;
+  /** "teacher_id|course_id" → partnerTeacherId */
+  semesterPairs?: Map<string, string>;
   courseNames?: Map<string, string>;
   courseEnrollment?: Map<string, { enrollment_7th: number; enrollment_8th: number }>;
   /** Total unique students per grade (not course-enrollment sums) */
@@ -62,9 +64,10 @@ function courseLabel(courseId: string, courseNames?: Map<string, string>): strin
 function sign(n: number) { return n > 0 ? "+" : ""; }
 function netCls(n: number) { return n > 0 ? "summary-pos" : n < 0 ? "summary-neg" : ""; }
 
-export default function ScheduleGrid({ sections, teachers, onSelectTeacher, selectedTeacherId, fixedKeys, gridLockedKeys, coteachKeys, courseNames, totalStudents, onToggleLock, onSwap, coteachPairs }: Props) {
+export default function ScheduleGrid({ sections, teachers, onSelectTeacher, selectedTeacherId, fixedKeys, gridLockedKeys, coteachKeys, semesterPairs, courseNames, totalStudents, onToggleLock, onSwap, coteachPairs }: Props) {
   const dragSrc = useRef<{ teacher_id: string; course_id: string; period: number } | null>(null);
   const [dragOverKey, setDragOverKey] = useState<string | null>(null);
+  const [swapWarning, setSwapWarning] = useState<string | null>(null);
   // lookup: teacher_id → period → Section
   const lookup = new Map<string, Map<number, Section>>();
   for (const s of sections) {
@@ -115,6 +118,15 @@ export default function ScheduleGrid({ sections, teachers, onSelectTeacher, sele
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
+
+      {swapWarning && (
+        <div style={{
+          padding: "7px 40px", background: "#fef3c7", borderBottom: "1px solid #fcd34d",
+          fontFamily: "'Helvetica Neue', Arial, sans-serif", fontSize: 12, color: "#92400e",
+        }}>
+          {swapWarning}
+        </div>
+      )}
 
       {/* ── Schedule grid (summary rows inline at top for column alignment) ── */}
       <div style={{ flex: 1, overflow: "auto" }}>
@@ -260,6 +272,7 @@ export default function ScheduleGrid({ sections, teachers, onSelectTeacher, sele
                         const isDataLocked = fixedKeys?.has(key) && !gridLockedKeys?.has(key);
                         const isGridLocked = gridLockedKeys?.has(key);
                         const isCoteach = coteachKeys?.has(`${sec.teacher_id}|${sec.course_id}|${sec.period}`);
+                        const isSemesterPair = semesterPairs?.has(`${sec.teacher_id}|${sec.course_id}`) ?? false;
                         const isLockable = !!onToggleLock && !isDataLocked;
                         const dragKey = `${teacher.teacher_id}|${p}`;
                         const isDragOver = dragOverKey === dragKey;
@@ -268,7 +281,7 @@ export default function ScheduleGrid({ sections, teachers, onSelectTeacher, sele
                             key={p}
                             className={`period-cell${isGridLocked ? " grid-locked" : ""}${isLockable ? " lockable" : ""}${isDragOver ? " drag-over" : ""}`}
                             onClick={isLockable ? (e) => { e.stopPropagation(); onToggleLock(sec.teacher_id, sec.course_id, sec.period); } : undefined}
-                            title={isDataLocked ? "Locked in data table" : isGridLocked ? "Click to unlock" : isCoteach ? "Co-taught — drags with partner" : isLockable ? "Click to lock" : undefined}
+                            title={isDataLocked ? "Locked in data table" : isGridLocked ? "Click to unlock" : isCoteach ? "Co-taught — drags with partner" : isSemesterPair ? "Semester pair — drags with paired teacher" : isLockable ? "Click to lock" : undefined}
                             draggable={!!onSwap}
                             onDragStart={onSwap ? (e) => {
                               dragSrc.current = { teacher_id: teacher.teacher_id, course_id: sec.course_id, period: p };
@@ -287,18 +300,38 @@ export default function ScheduleGrid({ sections, teachers, onSelectTeacher, sele
                               e.preventDefault();
                               setDragOverKey(null);
                               const src = dragSrc.current;
-                              if (src && src.teacher_id === teacher.teacher_id && src.period !== p) {
-                                onSwap(teacher.teacher_id, src.course_id, src.period, sec.course_id, p);
-                              }
                               dragSrc.current = null;
+                              if (!src || src.teacher_id !== teacher.teacher_id || src.period === p) return;
+
+                              // Check semester pair partner for conflicts
+                              const semPartner = semesterPairs?.get(`${src.teacher_id}|${src.course_id}`);
+                              if (semPartner) {
+                                const partnerSrcKey = `${semPartner}|${src.course_id}|${src.period}`;
+                                const partnerDstKey = `${semPartner}|${src.course_id}|${p}`;
+                                // Also check what's in the partner's destination slot
+                                const partnerDstSection = lookup.get(semPartner)?.get(p);
+                                const partnerDstCourseKey = partnerDstSection ? `${semPartner}|${partnerDstSection.course_id}|${p}` : null;
+                                const blocked =
+                                  (fixedKeys?.has(partnerSrcKey) && !gridLockedKeys?.has(partnerSrcKey)) ||
+                                  (fixedKeys?.has(partnerDstKey) && !gridLockedKeys?.has(partnerDstKey)) ||
+                                  (partnerDstCourseKey && fixedKeys?.has(partnerDstCourseKey) && !gridLockedKeys?.has(partnerDstCourseKey));
+                                if (blocked) {
+                                  setSwapWarning("Cannot move — semester pair partner has a locked assignment in one of these periods.");
+                                  setTimeout(() => setSwapWarning(null), 4000);
+                                  return;
+                                }
+                              }
+
+                              onSwap(teacher.teacher_id, src.course_id, src.period, sec.course_id, p);
                             } : undefined}
                           >
                             <span className="period-cell-inner">
-                              {(isDataLocked || isGridLocked || isCoteach) && (
+                              {(isDataLocked || isGridLocked || isCoteach || isSemesterPair) && (
                                 <span className="pill-icons">
                                   {isDataLocked && <LockIcon className="pill-icon-data" />}
                                   {isGridLocked && <GridLockIcon />}
                                   {isCoteach && <CoteachIcon />}
+                                  {isSemesterPair && <SemesterPairIcon />}
                                 </span>
                               )}
                               <span className={pillClass(teacher.department, isConf)}>
@@ -353,6 +386,15 @@ function CoteachIcon() {
   return (
     <svg className="pill-icon" width="11" height="9" viewBox="0 0 24 24" fill="currentColor">
       <path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/>
+    </svg>
+  );
+}
+
+/** Swap arrows icon — used for semester pairs (two teachers sharing same course periods) */
+function SemesterPairIcon() {
+  return (
+    <svg className="pill-icon" width="11" height="9" viewBox="0 0 24 24" fill="currentColor">
+      <path d="M6.99 11L3 15l3.99 4v-3H14v-2H6.99v-3zM21 9l-3.99-4v3H10v2h7.01v3L21 9z"/>
     </svg>
   );
 }
