@@ -3,10 +3,17 @@
   "configurations": [
     {
       "name": "frontend",
-      "runtimeExecutable": "/Users/garrettgunther/.nvm/versions/node/v22.16.0/bin/node",
-      "runtimeArgs": ["/Users/garrettgunther/Projects/MasterScheduleSolver/frontend/node_modules/.bin/vite", "--port", "5173"],
+      "runtimeExecutable": "/usr/local/bin/node",
+      "runtimeArgs": ["/Users/carleerasmussen/Projects/masterschedule/frontend/node_modules/.bin/vite", "--port", "5173"],
       "port": 5173,
       "cwd": "frontend"
+    },
+    {
+      "name": "backend",
+      "runtimeExecutable": "/usr/bin/python3",
+      "runtimeArgs": ["-m", "uvicorn", "main:app", "--port", "8000", "--reload"],
+      "port": 8000,
+      "cwd": "backend"
     }
   ]
 }
